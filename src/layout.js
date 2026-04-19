@@ -34,7 +34,7 @@ export class Layout {
         this.rows = STREAM.rows || 24;
         this.cols = STREAM.columns || 100;
         this.cwd = "";
-        this.title = "copilot-replay by Lukas Lundin";
+        this.title = "copilot-replay";
         this.speed = 1;
         this.paused = false;
         this.started = false;
@@ -198,23 +198,56 @@ export class Layout {
         // Bottom rule
         rawWrite(`\x1b[${start + 2 + this.inputRows};1H\x1b[2K`);
         rawWrite(rule);
-        // Status bar.
+        // Status bar — dynamically hide elements when the terminal is narrow.
         rawWrite(`\x1b[${start + 3 + this.inputRows};1H\x1b[2K`);
         const speedStr = fg.bold(fg.white(formatSpeed(this.speed)));
-        const controls = this.paused
+
+        // Build controls string at various detail levels.
+        const ctlFull = this.paused
             ? this.started
                 ? `${fg.yellow("⏸ paused")}  ${fg.gray(
-                      "space to resume   ← → prev/next   q quit",
+                      "space resume   ← → step   q quit",
                   )}`
                 : `${fg.yellow("⏸")}  ${fg.bold(fg.white("press space"))} ` +
                   `${fg.gray("to start replay   q quit")}`
             : `${fg.gray("space pause   ← → prev/next   +/− speed   q quit")}`;
-        const ctl = `${speedStr}  ${controls}`;
-        const right = this.title;
-        const ctlLen = stripAnsi(ctl).length;
-        const rightLen = stripAnsi(right).length;
-        const pad = Math.max(1, this.cols - ctlLen - rightLen);
-        rawWrite(`${ctl}${" ".repeat(pad)}${fg.gray(right)}`);
+        const ctlMedium = this.paused
+            ? this.started
+                ? `${fg.yellow("⏸")}  ${fg.gray("space ← → q")}`
+                : `${fg.yellow("⏸")}  ${fg.bold(fg.white("space"))} ${fg.gray("to start")}`
+            : `${fg.gray("space  ← →  +/−  q")}`;
+        const ctlShort = this.paused
+            ? `${fg.yellow("⏸")}`
+            : "";
+
+        const right = "copilot-replay";
+        const rightLen = right.length;
+
+        // Try full → medium → short → no-right progressively.
+        let bar = "";
+        const tryFit = (ctl, showRight) => {
+            const candidate = `${speedStr}  ${ctl}`;
+            const cLen = stripAnsi(candidate).length;
+            const rLen = showRight ? rightLen : 0;
+            const gap = this.cols - cLen - rLen;
+            if (gap >= 1) {
+                bar = showRight
+                    ? `${candidate}${" ".repeat(gap)}${fg.gray(right)}`
+                    : `${candidate}${" ".repeat(Math.max(0, gap))}`;
+                return true;
+            }
+            return false;
+        };
+
+        if (
+            !tryFit(ctlFull, true) &&
+            !tryFit(ctlFull, false) &&
+            !tryFit(ctlMedium, false) &&
+            !tryFit(ctlShort, false)
+        ) {
+            bar = speedStr;
+        }
+        rawWrite(bar);
         rawWrite("\x1b8");
     }
 
