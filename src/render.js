@@ -51,6 +51,60 @@ export async function emitSessionStart(ev, ctx, player) {
     await typeColoredLine(player, line, { perCharMs: 8 });
 }
 
+// ── Helpers for tool-call rendering ─────────────────────────────────────
+
+function baseFromPath(p) {
+    if (!p) return "";
+    const s = String(p);
+    const idx = Math.max(s.lastIndexOf("/"), s.lastIndexOf("\\"));
+    return idx >= 0 ? s.slice(idx + 1) : s;
+}
+
+// Count logical lines in a string, ignoring a single trailing newline.
+function countLines(text) {
+    if (!text) return 0;
+    return text.replace(/\n$/, "").split("\n").length;
+}
+
+// Parse a unified diff from detailedContent to get accurate +added/-removed.
+function parseDiffStats(diffText) {
+    if (!diffText) return null;
+    let added = 0;
+    let removed = 0;
+    for (const line of diffText.split("\n")) {
+        if (line.startsWith("+") && !line.startsWith("+++")) added++;
+        else if (line.startsWith("-") && !line.startsWith("---")) removed++;
+    }
+    return added || removed ? { added, removed } : null;
+}
+
+// Internal tools that are hidden from replay output — they are plumbing
+// the demo audience doesn't need to see.
+const HIDDEN_TOOLS = new Set([
+    "report_intent",
+    "stop_bash",
+    "update_todo",
+    "list_bash",
+]);
+
+// Map raw tool names to friendlier display labels.
+function toolLabel(name) {
+    switch (name) {
+        case "bash":
+        case "shell":
+        case "powershell":
+        case "read_bash":
+        case "write_bash":
+            return "shell";
+        case "task":
+            return "agent";
+        case "exit_plan_mode":
+            return "plan";
+        default:
+            return name;
+    }
+}
+
 // Short one-liner summary of a tool call's primary argument. Tool-specific
 // so the replay reads naturally (path for editors, command for shell, etc).
 export function summarizeToolArgs(toolName, args) {
@@ -81,6 +135,16 @@ export function summarizeToolArgs(toolName, args) {
             return truncate(String(a.intent ?? ""), 160);
         case "ask_user":
             return truncate(String(a.message ?? ""), 160);
+        case "sql":
+            return truncate(String(a.query ?? ""), 160);
+        case "read_bash":
+            return "";
+        case "write_bash":
+            return truncate(String(a.input ?? ""), 80);
+        case "task":
+        case "task_complete":
+        case "exit_plan_mode":
+            return "";
         default: {
             try {
                 return truncate(JSON.stringify(a), 160);
@@ -94,12 +158,6 @@ export function summarizeToolArgs(toolName, args) {
 // Human title fallback when the agent didn't supply a description.
 export function defaultToolTitle(name, args) {
     const a = args && typeof args === "object" ? args : {};
-    const baseFromPath = (p) => {
-        if (!p) return "";
-        const s = String(p);
-        const idx = Math.max(s.lastIndexOf("/"), s.lastIndexOf("\\"));
-        return idx >= 0 ? s.slice(idx + 1) : s;
-    };
     switch (name) {
         case "view":
         case "show_file":
@@ -112,6 +170,10 @@ export function defaultToolTitle(name, args) {
         case "shell":
         case "powershell":
             return "Run shell command";
+        case "read_bash":
+            return "Read shell output";
+        case "write_bash":
+            return "Send shell input";
         case "grep":
             return a.pattern ? `Search for ${a.pattern}` : "Search";
         case "glob":
@@ -124,6 +186,14 @@ export function defaultToolTitle(name, args) {
             return "Report intent";
         case "ask_user":
             return "Ask user";
+        case "sql":
+            return "SQL query";
+        case "task":
+            return a.description || a.name || "Run agent task";
+        case "task_complete":
+            return "Task complete";
+        case "exit_plan_mode":
+            return "Plan approved";
         default:
             return name;
     }
@@ -166,7 +236,7 @@ function emitToolStart(name, args, resultData) {
     const title = description || defaultToolTitle(name, args);
     writeln(
         `${fg.green(BULLET)} ${fg.bold(fg.white(title))} ` +
-            `${fg.gray(`(${name})`)}`,
+            `${fg.gray(`(${toolLabel(name)})`)}`,
     );
     if (primary) {
         const lines = wrapLines(truncate(primary, 300), 4);
@@ -176,6 +246,62 @@ function emitToolStart(name, args, resultData) {
         }
     }
     if (resultData) emitToolResult(name, resultData);
+}
+
+// ── Specialized tool renderers ─────────────────────────────────────────
+
+function emitCreateFile(args) {
+    const path = String(args?.path ?? "");
+    const base = baseFromPath(path) || "file";
+    const lines = countLines(String(args?.file_text ?? ""));
+
+    let title = `${fg.green(BULLET)} ${fg.bold(fg.white(`Create ${base}`))}`;
+    if (lines > 0) title += ` ${fg.green(`+${lines}`)}`;
+    writeln(title);
+
+    if (path) {
+        writeln(`  ${fg.gray("⎿")} ${fg.gray(shortenPath(path))}`);
+    }
+}
+
+function emitEditFile(args, resultData) {
+    const path = String(args?.path ?? "");
+    const base = baseFromPath(path) || "file";
+
+    // Prefer accurate diff stats from the unified diff in detailedContent.
+    const detailed = resultData?.result?.detailedContent ?? "";
+    let stats = parseDiffStats(detailed);
+    // Fallback: count old_str vs new_str lines (less accurate but usable).
+    if (!stats) {
+        const oldLines = countLines(String(args?.old_str ?? ""));
+        const newLines = countLines(String(args?.new_str ?? ""));
+        if (oldLines || newLines) stats = { added: newLines, removed: oldLines };
+    }
+
+    let title = `${fg.green(BULLET)} ${fg.bold(fg.white(`Edit ${base}`))}`;
+    if (stats?.added) title += ` ${fg.green(`+${stats.added}`)}`;
+    if (stats?.removed) title += ` ${fg.red(`-${stats.removed}`)}`;
+    writeln(title);
+
+    if (path) {
+        writeln(`  ${fg.gray("⎿")} ${fg.gray(shortenPath(path))}`);
+    }
+}
+
+function emitTaskComplete(args, resultData) {
+    const summary =
+        String(args?.summary ?? "").trim() ||
+        String(resultData?.result?.content ?? "").trim();
+    writeln(`${fg.green(BULLET)} ${fg.bold(fg.white("Task complete"))}`);
+    if (summary) {
+        const lines = renderMarkdownLines(summary, 2);
+        if (lines.length > 0) {
+            writeln(`  ${fg.gray("⎿")} ${lines[0]}`);
+            for (let i = 1; i < lines.length; i++) {
+                writeln(`  ${lines[i]}`);
+            }
+        }
+    }
 }
 
 // Parse an ask_user tool result into a structured answer. Copilot CLI
@@ -427,13 +553,31 @@ export function describeEvent(ev, opts, ctx) {
         }
         case "tool.execution_start": {
             const resultEv = ctx?.toolResults?.get(d.toolCallId);
-            if (d.toolName === "ask_user") {
+            const toolName = d.toolName ?? "tool";
+
+            // Hide internal plumbing tools from the demo audience.
+            if (HIDDEN_TOOLS.has(toolName)) return null;
+
+            // Specialized renderers for tools that benefit from richer
+            // presentation than the generic bullet+summary.
+            if (toolName === "ask_user") {
                 return async (player) => {
                     await emitAskUser(d, resultEv?.data, player);
                 };
             }
+            if (toolName === "create") {
+                return () => emitCreateFile(d.arguments);
+            }
+            if (toolName === "edit") {
+                return () => emitEditFile(d.arguments, resultEv?.data);
+            }
+            if (toolName === "task_complete") {
+                return () => emitTaskComplete(d.arguments, resultEv?.data);
+            }
+
+            // Generic tool rendering for everything else.
             return () =>
-                emitToolStart(d.toolName ?? "tool", d.arguments, resultEv?.data);
+                emitToolStart(toolName, d.arguments, resultEv?.data);
         }
         case "tool.execution_complete":
             return null;
