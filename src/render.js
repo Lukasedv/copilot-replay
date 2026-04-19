@@ -178,6 +178,207 @@ function emitToolStart(name, args, resultData) {
     if (resultData) emitToolResult(name, resultData);
 }
 
+// Parse an ask_user tool result into a structured answer. Copilot CLI
+// produces a handful of well-known shapes; everything else falls through
+// as a free-text response.
+function parseAskUserResult(resultData) {
+    const res = resultData?.result;
+    const content = String(res?.content ?? "").trim();
+    const detailed = String(res?.detailedContent ?? "").trim();
+    if (!content && !detailed) return null;
+    if (/^User declined\b/i.test(content)) return { kind: "declined" };
+    if (/^User can(celled|celed)\b/i.test(content)) {
+        return { kind: "cancelled" };
+    }
+    const selMatch = content.match(/^User selected:\s*([\s\S]+)$/);
+    if (selMatch) {
+        return { kind: "choice", choice: selMatch[1].trim() };
+    }
+    // Form response: detailedContent has "User responded:\nkey: val\n..."
+    // If that's present, parse it as key→value pairs.
+    if (/^User responded:?\s*\n/i.test(detailed)) {
+        const body = detailed.replace(/^User responded:?\s*\n/i, "");
+        const fields = [];
+        for (const ln of body.split("\n")) {
+            const m = ln.match(/^\s*([^:]+):\s*(.*)$/);
+            if (m) fields.push({ key: m[1].trim(), value: m[2].trim() });
+        }
+        if (fields.length > 0) return { kind: "form", fields };
+    }
+    const respMatch = content.match(/^User responded:\s*([\s\S]+)$/i);
+    if (respMatch) {
+        const body = respMatch[1].trim();
+        // Inline comma-separated "k1=v1, k2=v2" form output.
+        if (/^[\w.-]+=[^,]/.test(body) && body.includes("=")) {
+            const fields = [];
+            for (const part of body.split(/,\s*/)) {
+                const m = part.match(/^([\w.-]+)\s*=\s*(.+)$/);
+                if (m) fields.push({ key: m[1].trim(), value: m[2].trim() });
+            }
+            if (fields.length > 0) return { kind: "form", fields };
+        }
+        return { kind: "text", text: body };
+    }
+    return { kind: "text", text: detailed || content };
+}
+
+// Extract the list of choices from an ask_user call, mapping each to a
+// short display label and a "const" value that the result will match on.
+// Returns an array of { label, const } entries, or null if this isn't a
+// multiple-choice style call.
+function extractAskUserChoices(args) {
+    if (!args || typeof args !== "object") return null;
+    if (Array.isArray(args.choices) && args.choices.length > 0) {
+        return args.choices.map((c) => ({ label: String(c), const: String(c) }));
+    }
+    return null;
+}
+
+// Extract form fields from a `requestedSchema` so we can show each field's
+// human title next to the user's chosen value. Returns null if this call
+// doesn't have a schema.
+function extractAskUserFields(args) {
+    const props = args?.requestedSchema?.properties;
+    if (!props || typeof props !== "object") return null;
+    const out = [];
+    for (const key of Object.keys(props)) {
+        const p = props[key] || {};
+        const title = String(p.title || key);
+        const options = [];
+        if (Array.isArray(p.oneOf)) {
+            for (const o of p.oneOf) {
+                if (o && typeof o === "object") {
+                    options.push({
+                        const: String(o.const ?? ""),
+                        label: String(o.title ?? o.const ?? ""),
+                    });
+                }
+            }
+        } else if (Array.isArray(p.enum)) {
+            const enumNames = Array.isArray(p.enumNames) ? p.enumNames : null;
+            for (let i = 0; i < p.enum.length; i++) {
+                options.push({
+                    const: String(p.enum[i]),
+                    label: String(
+                        enumNames?.[i] ?? p.enum[i],
+                    ),
+                });
+            }
+        }
+        out.push({
+            key,
+            title,
+            type: p.type || "string",
+            isFreeText: !options.length,
+            options,
+        });
+    }
+    return out.length > 0 ? out : null;
+}
+
+async function emitAskUser(d, resultData, player) {
+    const args = d.arguments || {};
+    const question = String(args.question ?? args.message ?? "").trim();
+    const choices = extractAskUserChoices(args);
+    const fields = extractAskUserFields(args);
+    const answer = parseAskUserResult(resultData);
+
+    writeln(
+        `${fg.yellow(BULLET)} ${fg.bold(fg.white("Question for you"))} ` +
+            `${fg.gray("(ask_user)")}`,
+    );
+    if (question) {
+        const qLines = renderMarkdownLines(question, 2);
+        for (const ln of qLines) writeln(`  ${ln}`);
+    }
+
+    // Multiple choice — show each option, highlight the one that was picked.
+    if (choices) {
+        writeln("");
+        const selected = answer?.kind === "choice" ? answer.choice : null;
+        for (const c of choices) {
+            const isSel = selected && c.label === selected;
+            const mark = isSel ? fg.cyan("●") : fg.gray("○");
+            const text = isSel ? fg.bold(fg.cyan(c.label)) : fg.gray(c.label);
+            writeln(`    ${mark} ${text}`);
+        }
+        writeln("");
+        if (selected) {
+            const line = `  ${fg.gray("⎿")} ${fg.dim(fg.gray("User selected: "))}${fg.cyan(selected)}`;
+            await typeColoredLine(player, line, { perCharMs: 12 });
+        } else if (answer?.kind === "declined") {
+            writeln(`  ${fg.gray("⎿")} ${fg.dim(fg.gray("User declined to answer"))}`);
+        } else if (answer?.kind === "cancelled") {
+            writeln(`  ${fg.gray("⎿")} ${fg.dim(fg.gray("User cancelled"))}`);
+        }
+        return;
+    }
+
+    // Schema form — list each field's title and the value the user picked,
+    // typing free-text values character-by-character for extra flavor.
+    if (fields) {
+        writeln("");
+        const answered = new Map();
+        if (answer?.kind === "form") {
+            for (const f of answer.fields) answered.set(f.key, f.value);
+        }
+        for (const f of fields) {
+            const val = answered.get(f.key);
+            const labelLine =
+                `  ${fg.gray("▸")} ${fg.bold(fg.white(f.title))}` +
+                `  ${fg.dim(fg.gray(`(${f.key})`))}`;
+            writeln(labelLine);
+            if (val != null) {
+                let displayLabel = val;
+                // If this field was an enum, show the human label of the
+                // chosen value rather than the raw const.
+                const opt = f.options.find((o) => o.const === val);
+                if (opt) displayLabel = opt.label;
+                const isFree = f.isFreeText;
+                const line =
+                    `      ${fg.gray("→")} ` +
+                    (isFree ? fg.white(displayLabel) : fg.cyan(displayLabel));
+                if (isFree && !player.fastForwarding) {
+                    await typeColoredLine(player, line, { perCharMs: 20 });
+                } else {
+                    writeln(line);
+                }
+            } else {
+                writeln(`      ${fg.gray("→")} ${fg.dim(fg.gray("(no answer)"))}`);
+            }
+        }
+        writeln("");
+        if (answer?.kind === "declined") {
+            writeln(`  ${fg.gray("⎿")} ${fg.dim(fg.gray("User declined"))}`);
+        } else if (answer?.kind === "cancelled") {
+            writeln(`  ${fg.gray("⎿")} ${fg.dim(fg.gray("User cancelled"))}`);
+        } else {
+            writeln(`  ${fg.gray("⎿")} ${fg.dim(fg.gray("User submitted form"))}`);
+        }
+        return;
+    }
+
+    // Free-text reply (no choices, no schema). Type the answer out so it
+    // feels like the user is responding live.
+    if (answer?.kind === "text" && answer.text) {
+        writeln("");
+        const wrapped = wrapLines(answer.text, 6);
+        for (let i = 0; i < wrapped.length; i++) {
+            const prefix = i === 0 ? `    ${fg.cyan("›")} ` : "      ";
+            const line = prefix + fg.white(wrapped[i]);
+            if (!player.fastForwarding) {
+                await typeColoredLine(player, line, { perCharMs: 18 });
+            } else {
+                writeln(line);
+            }
+        }
+    } else if (answer?.kind === "declined") {
+        writeln(`  ${fg.gray("⎿")} ${fg.dim(fg.gray("User declined"))}`);
+    } else if (answer?.kind === "cancelled") {
+        writeln(`  ${fg.gray("⎿")} ${fg.dim(fg.gray("User cancelled"))}`);
+    }
+}
+
 export function describeEvent(ev, opts, ctx) {
     const d = ev.data || {};
     switch (ev.type) {
@@ -226,6 +427,11 @@ export function describeEvent(ev, opts, ctx) {
         }
         case "tool.execution_start": {
             const resultEv = ctx?.toolResults?.get(d.toolCallId);
+            if (d.toolName === "ask_user") {
+                return async (player) => {
+                    await emitAskUser(d, resultEv?.data, player);
+                };
+            }
             return () =>
                 emitToolStart(d.toolName ?? "tool", d.arguments, resultEv?.data);
         }
