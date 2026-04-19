@@ -155,65 +155,95 @@ export async function typeUserPrompt(content, player) {
 // ASCII splash banner pinned at the top (same spot the real Copilot CLI
 // shows its banner on launch). Drawn only while paused before the first
 // event — once play begins it's wiped and never shown again.
-export function renderStartOverlay(tick = 0) {
+//
+// To avoid flicker on the 600ms indicator pulse, this function draws the
+// full overlay once (banner + prompt) and remembers where the ▶ glyph
+// landed. Subsequent calls only rewrite that single character. Pass
+// `full: true` to force a complete redraw (e.g. on terminal resize).
+let _overlayState = null;
+
+export function renderStartOverlay(tick = 0, { full = false } = {}) {
     if (!layout.active) return;
     const cols = layout.cols;
     const top = 1;
     const bottom = layout.scrollBottomRow;
-    const center = (s) => {
-        const len = stripAnsi(s).length;
-        const pad = Math.max(0, Math.floor((cols - len) / 2));
-        return " ".repeat(pad) + s;
-    };
+
+    // Plain text of the title (no ANSI, no play glyph) — used for layout.
+    const titleText = "▶   Press SPACE to start replay";
+    const titleLen = titleText.length;
+    const titlePad = Math.max(0, Math.floor((cols - titleLen) / 2));
+
+    const needsFullRedraw =
+        full ||
+        !_overlayState ||
+        _overlayState.cols !== cols ||
+        _overlayState.bottom !== bottom;
+
+    if (needsFullRedraw) {
+        rawWrite("\x1b7");
+        for (let r = top; r <= bottom; r++) {
+            rawWrite(`\x1b[${r};1H\x1b[2K`);
+        }
+
+        const splash = renderSplashLines();
+        const bannerFits = bottom - top + 1 >= splash.length + 4;
+        let promptRow;
+        if (bannerFits) {
+            const bannerTop = top;
+            for (let i = 0; i < splash.length; i++) {
+                const line = splash[i];
+                const visible = stripAnsi(line).length;
+                const pad = Math.max(0, Math.floor((cols - visible) / 2));
+                rawWrite(`\x1b[${bannerTop + i};1H`);
+                rawWrite(" ".repeat(pad) + line);
+            }
+            const bannerBottom = bannerTop + splash.length - 1;
+            promptRow = Math.min(
+                bottom - 2,
+                bannerBottom +
+                    Math.max(2, Math.floor((bottom - bannerBottom) / 2)),
+            );
+        } else {
+            promptRow = Math.max(top, Math.floor((top + bottom) / 2) - 1);
+        }
+
+        // Draw the title line. Leave the ▶ cell to the tick-update step
+        // below so both code paths write it the same way.
+        const rest =
+            `   ${fg.bold(fg.white("Press"))} ` +
+            `${fg.bold(fg.cyan("SPACE"))} ` +
+            `${fg.bold(fg.white("to start replay"))}`;
+        rawWrite(`\x1b[${promptRow};${titlePad + 2}H`);
+        rawWrite(rest);
+
+        // Sub-line: "q to quit".
+        const sub = fg.gray("q to quit");
+        const subLen = stripAnsi(sub).length;
+        const subPad = Math.max(0, Math.floor((cols - subLen) / 2));
+        rawWrite(`\x1b[${promptRow + 2};${subPad + 1}H`);
+        rawWrite(sub);
+
+        _overlayState = {
+            cols,
+            bottom,
+            promptRow,
+            playCol: titlePad + 1,
+        };
+        rawWrite("\x1b8");
+    }
+
+    // Update just the ▶ cell — the only thing that changes on tick.
     const on = tick % 2 === 0;
     const play = on ? fg.white("▶") : fg.gray("▶");
-    const title =
-        `${play}   ${fg.bold(fg.white("Press"))} ` +
-        `${fg.bold(fg.cyan("SPACE"))} ` +
-        `${fg.bold(fg.white("to start replay"))}`;
-    const sub = fg.gray("q to quit");
-
     rawWrite("\x1b7");
-    // Clear the whole scroll region.
-    for (let r = top; r <= bottom; r++) {
-        rawWrite(`\x1b[${r};1H\x1b[2K`);
-    }
-
-    // Draw the splash banner at the top if there's room for it plus the
-    // prompt (banner + 2 blank rows + title + sub = banner.length + 4).
-    // On short terminals we fall back to the plain centered prompt.
-    const splash = renderSplashLines();
-    const bannerFits = bottom - top + 1 >= splash.length + 4;
-    let promptRow;
-    if (bannerFits) {
-        const bannerTop = top;
-        for (let i = 0; i < splash.length; i++) {
-            const line = splash[i];
-            const visible = stripAnsi(line).length;
-            const pad = Math.max(0, Math.floor((cols - visible) / 2));
-            rawWrite(`\x1b[${bannerTop + i};1H`);
-            rawWrite(" ".repeat(pad) + line);
-        }
-        const bannerBottom = bannerTop + splash.length - 1;
-        // Place the prompt centered in the remaining space below the
-        // banner, biased upward so it stays visually close to the banner.
-        promptRow = Math.min(
-            bottom - 2,
-            bannerBottom + Math.max(2, Math.floor((bottom - bannerBottom) / 2)),
-        );
-    } else {
-        promptRow = Math.max(top, Math.floor((top + bottom) / 2) - 1);
-    }
-
-    rawWrite(`\x1b[${promptRow};1H`);
-    rawWrite(center(title));
-    rawWrite(`\x1b[${promptRow + 2};1H`);
-    rawWrite(center(sub));
+    rawWrite(`\x1b[${_overlayState.promptRow};${_overlayState.playCol}H`);
+    rawWrite(play);
     rawWrite("\x1b8");
 }
 
 export function clearStartOverlay() {
     if (!layout.active) return;
+    _overlayState = null;
     for (let r = 1; r <= layout.scrollBottomRow; r++) {
         rawWrite(`\x1b[${r};1H\x1b[2K`);
     }
@@ -224,8 +254,15 @@ export async function waitForStart(player) {
     if (!isTTY || !player.paused) return;
     let tick = 0;
     const draw = () => renderStartOverlay(tick);
+    // Force a full redraw whenever the layout re-invokes us (e.g. on
+    // terminal resize). During normal blink ticks the cached state makes
+    // renderStartOverlay only rewrite the ▶ glyph, which is flicker-free.
+    const fullDraw = () => {
+        _overlayState = null;
+        renderStartOverlay(tick);
+    };
     draw();
-    layout.overlayDraw = draw;
+    layout.overlayDraw = fullDraw;
     const iv = setInterval(() => {
         tick++;
         if (player.paused && !player.quitRequested) draw();
