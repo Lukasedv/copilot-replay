@@ -16,6 +16,7 @@ import { fg, isTTY, stripAnsi } from "./ansi.js";
 import { rawWrite, writeln } from "./io.js";
 import { wrapLines } from "./format.js";
 import { layout } from "./layout.js";
+import { renderSplashLines } from "./banner.js";
 
 const FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
@@ -150,15 +151,15 @@ export async function typeUserPrompt(content, player) {
     writeln();
 }
 
-// Centered "Press SPACE to start replay" overlay. Drawn only while paused
-// before the first event — once play begins it's wiped and never shown
-// again.
+// Centered "Press SPACE to start replay" overlay, with the Copilot Replay
+// ASCII splash banner pinned at the top (same spot the real Copilot CLI
+// shows its banner on launch). Drawn only while paused before the first
+// event — once play begins it's wiped and never shown again.
 export function renderStartOverlay(tick = 0) {
     if (!layout.active) return;
     const cols = layout.cols;
     const top = 1;
     const bottom = layout.scrollBottomRow;
-    const midRow = Math.max(top, Math.floor((top + bottom) / 2) - 1);
     const center = (s) => {
         const len = stripAnsi(s).length;
         const pad = Math.max(0, Math.floor((cols - len) / 2));
@@ -171,13 +172,42 @@ export function renderStartOverlay(tick = 0) {
         `${fg.bold(fg.cyan("SPACE"))} ` +
         `${fg.bold(fg.white("to start replay"))}`;
     const sub = fg.gray("q to quit");
+
     rawWrite("\x1b7");
+    // Clear the whole scroll region.
     for (let r = top; r <= bottom; r++) {
         rawWrite(`\x1b[${r};1H\x1b[2K`);
     }
-    rawWrite(`\x1b[${midRow};1H`);
+
+    // Draw the splash banner at the top if there's room for it plus the
+    // prompt (banner + 2 blank rows + title + sub = banner.length + 4).
+    // On short terminals we fall back to the plain centered prompt.
+    const splash = renderSplashLines();
+    const bannerFits = bottom - top + 1 >= splash.length + 4;
+    let promptRow;
+    if (bannerFits) {
+        const bannerTop = top;
+        for (let i = 0; i < splash.length; i++) {
+            const line = splash[i];
+            const visible = stripAnsi(line).length;
+            const pad = Math.max(0, Math.floor((cols - visible) / 2));
+            rawWrite(`\x1b[${bannerTop + i};1H`);
+            rawWrite(" ".repeat(pad) + line);
+        }
+        const bannerBottom = bannerTop + splash.length - 1;
+        // Place the prompt centered in the remaining space below the
+        // banner, biased upward so it stays visually close to the banner.
+        promptRow = Math.min(
+            bottom - 2,
+            bannerBottom + Math.max(2, Math.floor((bottom - bannerBottom) / 2)),
+        );
+    } else {
+        promptRow = Math.max(top, Math.floor((top + bottom) / 2) - 1);
+    }
+
+    rawWrite(`\x1b[${promptRow};1H`);
     rawWrite(center(title));
-    rawWrite(`\x1b[${midRow + 2};1H`);
+    rawWrite(`\x1b[${promptRow + 2};1H`);
     rawWrite(center(sub));
     rawWrite("\x1b8");
 }
