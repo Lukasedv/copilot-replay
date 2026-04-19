@@ -415,10 +415,10 @@ async function emitAskUser(d, resultData, player) {
     );
     if (question) {
         const qLines = renderMarkdownLines(question, 2);
-        for (const ln of qLines) writeln(`  ${ln}`);
+        await streamLines(qLines, player, { indent: "  ", perLineMs: 40 });
     }
 
-    // Multiple choice — show each option, highlight the one that was picked.
+    // Multiple choice — reveal options one by one, then type the selection.
     if (choices) {
         writeln("");
         const selected = answer?.kind === "choice" ? answer.choice : null;
@@ -427,9 +427,11 @@ async function emitAskUser(d, resultData, player) {
             const mark = isSel ? fg.cyan("●") : fg.gray("○");
             const text = isSel ? fg.bold(fg.cyan(c.label)) : fg.gray(c.label);
             writeln(`    ${mark} ${text}`);
+            await player.sleep(120);
         }
         writeln("");
         if (selected) {
+            await player.sleep(300);
             const line = `  ${fg.gray("⎿")} ${fg.dim(fg.gray("User selected: "))}${fg.cyan(selected)}`;
             await typeColoredLine(player, line, { perCharMs: 12 });
         } else if (answer?.kind === "declined") {
@@ -440,8 +442,8 @@ async function emitAskUser(d, resultData, player) {
         return;
     }
 
-    // Schema form — list each field's title and the value the user picked,
-    // typing free-text values character-by-character for extra flavor.
+    // Schema form — reveal fields one at a time and type out every answer
+    // so the audience can follow along.
     if (fields) {
         writeln("");
         const answered = new Map();
@@ -456,22 +458,25 @@ async function emitAskUser(d, resultData, player) {
             writeln(labelLine);
             if (val != null) {
                 let displayLabel = val;
-                // If this field was an enum, show the human label of the
-                // chosen value rather than the raw const.
                 const opt = f.options.find((o) => o.const === val);
                 if (opt) displayLabel = opt.label;
-                const isFree = f.isFreeText;
                 const line =
                     `      ${fg.gray("→")} ` +
-                    (isFree ? fg.white(displayLabel) : fg.cyan(displayLabel));
-                if (isFree && !player.fastForwarding) {
-                    await typeColoredLine(player, line, { perCharMs: 20 });
+                    (f.isFreeText
+                        ? fg.white(displayLabel)
+                        : fg.cyan(displayLabel));
+                if (!player.fastForwarding) {
+                    await player.sleep(200);
+                    await typeColoredLine(player, line, {
+                        perCharMs: f.isFreeText ? 20 : 12,
+                    });
                 } else {
                     writeln(line);
                 }
             } else {
                 writeln(`      ${fg.gray("→")} ${fg.dim(fg.gray("(no answer)"))}`);
             }
+            await player.sleep(150);
         }
         writeln("");
         if (answer?.kind === "declined") {
