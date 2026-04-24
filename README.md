@@ -124,6 +124,8 @@ replies, tool output) is scaled by the playback speed.
 | `--cap MS` | `3000` | Max delay between events (after scaling). Prevents dead air. |
 | `--min MS` | `30` | Min delay between events. |
 | `--no-thinking` | off | Hide assistant reasoning blocks. |
+| `--theme MODE` | `auto` | Color palette: `light`, `dark`, or `auto`. Auto-detect uses `COLORFGBG` then OSC 11 query, falls back to `dark`. Override with `COPILOT_REPLAY_THEME=light\|dark`. |
+| `--cli-mode` / `--realistic` | off | Present the replay as a live Copilot CLI session: real-CLI banner, no replay chrome, `@ files · # issues` plus model name in the footer. Press `→` to play one user-prompt segment; `space` still pauses. Speed is locked at 1×. |
 | `--include TYPES` | — | Comma-separated extra event types to show. |
 | `--exclude TYPES` | — | Comma-separated event types to hide. |
 | `-h, --help` | — | Show usage. |

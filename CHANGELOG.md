@@ -5,6 +5,26 @@ All notable changes to `copilot-replay` are documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- `--cli-mode` (alias `--realistic`) flag: replays a session as a
+  convincing live Copilot CLI session. Hides all replay chrome;
+  advance with `→`, pause/resume with `space`, speed locked at 1×.
+- Light/dark theme support (`--theme light|dark|auto`, env
+  `COPILOT_REPLAY_THEME`, OSC 11 auto-detection).
+- Input prompt rendered in a gray bg panel matching the real CLI.
+- MCP / plugin tool results suppressed (compact one-liner instead).
+- Mode-accent coloring: `plan` → cyan, `autopilot` → green chevron,
+  cursor, and status bar. Status bar shows `/ commands · ? help`.
+
+### Fixed
+- Skill-injected `user.message` events (with a `source` field) are
+  no longer rendered in the prompt.
+- Eliminated per-keystroke flash in the input box on Windows Terminal.
+- `fg.dim` uses explicit mid-grey instead of SGR 2 faint attribute,
+  which was invisible on light backgrounds.
+
 ## [0.1.0] - Initial release
 
 ### Added

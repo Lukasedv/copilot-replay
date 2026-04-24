@@ -10,25 +10,119 @@ export const NO_COLOR = !!process.env.NO_COLOR || !isTTY;
 
 export const ESC = "\x1b[";
 
-const c = (n) => (NO_COLOR ? (s) => s : (s) => `${ESC}${n}m${s}${ESC}0m`);
+// Two palettes of 256-color SGR codes, picked so each role has acceptable
+// contrast (~4.5:1 minimum for body text) on its target background.
+//
+// The "white" slot is semantically "primary readable text" — on a dark
+// background that's near-white, on a light background it collapses to
+// near-black. Renaming it would touch a lot of call sites; the role is
+// what matters, not the literal color name.
+const PALETTES = {
+    dark: {
+        gray: "38;5;244",
+        dim: "38;5;240",
+        red: "38;5;203",
+        green: "38;5;114",
+        yellow: "38;5;215",
+        orange: "38;5;209",
+        blue: "38;5;75",
+        cyan: "38;5;87",
+        magenta: "38;5;176",
+        white: "38;5;255",
+    },
+    light: {
+        gray: "38;5;240",
+        dim: "38;5;243",
+        red: "38;5;124",
+        green: "38;5;28",
+        yellow: "38;5;130",
+        orange: "38;5;166",
+        blue: "38;5;26",
+        cyan: "38;5;30",
+        magenta: "38;5;90",
+        white: "38;5;232",
+    },
+};
+
+const BG_PALETTES = {
+    // Subtle panels only — the input box bg should be visibly distinct
+    // from the scroll region but not compete with the text. These are
+    // two shades off the terminal bg on each theme: dark uses 235
+    // (one step lighter than typical terminal black), light uses 254
+    // (one step darker than typical #fbfbfa paper).
+    dark: { gray: "48;5;235" },
+    light: { gray: "48;5;254" },
+};
+
+let currentTheme = "dark";
+
+export function setTheme(name) {
+    if (PALETTES[name]) currentTheme = name;
+}
+
+export function getTheme() {
+    return currentTheme;
+}
+
+const ANSI_SGR_RE = /\x1b\[[0-9;]*m/g;
+
+// Resolve the SGR code at call time so theme switches between modules
+// without re-importing. NO_COLOR short-circuits to identity.
+const fgPaint = (name) =>
+    NO_COLOR
+        ? (s) => String(s)
+        : (s) => `${ESC}${PALETTES[currentTheme][name]}m${s}${ESC}0m`;
+
+const bgPaint = (name) =>
+    NO_COLOR
+        ? (s) => String(s)
+        : (s) => `${ESC}${BG_PALETTES[currentTheme][name]}m${s}${ESC}0m`;
+
+const boldPaint = NO_COLOR
+    ? (s) => String(s)
+    : (s) => `${ESC}1m${s}${ESC}0m`;
+
+// "dim" used to be SGR 2 ("faint"), which most terminals render by blending
+// the foreground toward the background. On light themes that makes the text
+// essentially invisible. We use an explicit mid-grey instead, theme-aware,
+// and strip any inner SGR sequences so callers like fg.dim(fg.gray(x))
+// actually render in the dim color rather than having the inner reset
+// cancel the outer color.
+const dimPaint = NO_COLOR
+    ? (s) => String(s)
+    : (s) =>
+          `${ESC}${PALETTES[currentTheme].dim}m` +
+          `${String(s).replace(ANSI_SGR_RE, "")}${ESC}0m`;
 
 export const fg = {
-    gray: c("38;5;244"),
-    dim: c("2"),
-    bold: c("1"),
-    red: c("38;5;203"),
-    green: c("38;5;114"),
-    yellow: c("38;5;215"),
-    orange: c("38;5;209"),
-    blue: c("38;5;75"),
-    cyan: c("38;5;87"),
-    magenta: c("38;5;176"),
-    white: c("38;5;255"),
+    gray: fgPaint("gray"),
+    dim: dimPaint,
+    bold: boldPaint,
+    red: fgPaint("red"),
+    green: fgPaint("green"),
+    yellow: fgPaint("yellow"),
+    orange: fgPaint("orange"),
+    blue: fgPaint("blue"),
+    cyan: fgPaint("cyan"),
+    magenta: fgPaint("magenta"),
+    white: fgPaint("white"),
 };
 
 export const bg = {
-    gray: c("48;5;236"),
+    gray: bgPaint("gray"),
 };
+
+// Opening SGR code for a bg color, without the trailing reset. Lets
+// callers paint a backgrounded region that embeds other fg colors
+// without each inner reset cancelling the bg. The caller is
+// responsible for emitting `\x1b[0m` at the end.
+export function bgOpen(name) {
+    if (NO_COLOR) return "";
+    const code = BG_PALETTES[currentTheme][name];
+    return code ? `${ESC}${code}m` : "";
+}
+
+export const ANSI_RESET = NO_COLOR ? "" : `${ESC}0m`;
 
 export const BULLET = "●";
 

@@ -7,6 +7,7 @@
 
 import { BULLET, fg } from "./ansi.js";
 import { writeln } from "./io.js";
+import { layout } from "./layout.js";
 import {
     formatDateTime,
     shortenPath,
@@ -103,6 +104,36 @@ function toolLabel(name) {
         default:
             return name;
     }
+}
+
+// MCP / plugin tools arrive with names like "workiq-ask_work_iq" or
+// "github-mcp-server-search_issues". They are not in our known tool
+// switch/case lists, so their args fall through to the generic JSON
+// dump, which on workiq can be a multi-kilobyte question + response
+// pair. Treat them specially: render a short, human-readable one-liner
+// from known keys and suppress the (often massive) result payload.
+const KNOWN_TOOL_NAMES = new Set([
+    "bash", "shell", "powershell", "read_bash", "write_bash", "list_bash",
+    "stop_bash", "edit", "create", "view", "show_file", "grep", "glob",
+    "web_fetch", "web_search", "report_intent", "ask_user", "sql", "task",
+    "task_complete", "exit_plan_mode", "update_todo",
+]);
+
+export function isMcpTool(name) {
+    if (!name || typeof name !== "string") return false;
+    if (KNOWN_TOOL_NAMES.has(name)) return false;
+    return name.includes("-");
+}
+
+function mcpToolSummary(args) {
+    if (!args || typeof args !== "object") return "";
+    // Prefer user-facing intent keys in this order.
+    for (const key of ["question", "query", "prompt", "message", "input", "text"]) {
+        if (typeof args[key] === "string" && args[key].trim()) {
+            return truncate(args[key].trim(), 200);
+        }
+    }
+    return "";
 }
 
 // Short one-liner summary of a tool call's primary argument. Tool-specific
@@ -300,6 +331,21 @@ function emitTaskComplete(args, resultData) {
             for (let i = 1; i < lines.length; i++) {
                 writeln(`  ${lines[i]}`);
             }
+        }
+    }
+}
+
+function emitMcpTool(name, args) {
+    const summary = mcpToolSummary(args);
+    writeln(
+        `${fg.green(BULLET)} ${fg.bold(fg.white(name))} ` +
+            `${fg.gray(`(${toolLabel(name)})`)}`,
+    );
+    if (summary) {
+        const lines = wrapLines(summary, 4);
+        writeln(`  ${fg.gray("⎿")} ${fg.gray(lines[0])}`);
+        for (let i = 1; i < lines.length; i++) {
+            writeln(`    ${fg.gray(lines[i])}`);
         }
     }
 }
@@ -520,6 +566,11 @@ export function describeEvent(ev, opts, ctx) {
         case "user.message": {
             const content = (d.content ?? "").trim();
             if (!content) return null;
+            // Filter out skill/system-injected user.messages — these have
+            // a `source` field (e.g. "skill-workiq") and contain payloads
+            // like <skill-context …> that the real Copilot CLI never types
+            // into the user prompt box.
+            if (d.source) return null;
             return async (player) => {
                 await typeUserPrompt(content, player);
             };
@@ -580,6 +631,12 @@ export function describeEvent(ev, opts, ctx) {
                 return () => emitTaskComplete(d.arguments, resultEv?.data);
             }
 
+            // MCP / plugin tools: show a clean one-liner, drop the giant
+            // response payload entirely.
+            if (isMcpTool(toolName)) {
+                return () => emitMcpTool(toolName, d.arguments);
+            }
+
             // Generic tool rendering for everything else.
             return () =>
                 emitToolStart(toolName, d.arguments, resultEv?.data);
@@ -587,9 +644,21 @@ export function describeEvent(ev, opts, ctx) {
         case "tool.execution_complete":
             return null;
         case "session.mode_changed":
-            return () => emitModeChange(d.previousMode, d.newMode);
+            return () => {
+                if (d.newMode) layout.setMode(String(d.newMode));
+                // Real Copilot CLI doesn't print "mode X → Y" lines;
+                // it surfaces the current mode as a label in the
+                // input-box chrome. In --cli-mode we match that and
+                // only update the label.
+                if (opts?.cliMode) return;
+                emitModeChange(d.previousMode, d.newMode);
+            };
         case "session.model_change":
-            return () => emitModelChange(d.previousModel, d.newModel);
+            return () => {
+                if (d.newModel) layout.setModel(String(d.newModel));
+                if (opts?.cliMode) return;
+                emitModelChange(d.previousModel, d.newModel);
+            };
         case "session.info":
             return () => emitInfo(String(d.message ?? ""));
         case "session.plan_changed":

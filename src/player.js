@@ -39,6 +39,12 @@ export class Player {
         // stays in step mode at the new landing point.
         this._pauseAfterSeek = false;
         this._wake = null;
+        // CLI mode: "one user-prompt segment per right-arrow press"
+        // budget. Each user.message we're about to render consumes one
+        // unit; when the budget hits zero we auto-pause and wait for the
+        // user to press → again. Starts at 0 so the initial right-arrow
+        // press is required before the first user prompt plays.
+        this._cliBudget = 0;
     }
 
     wake() {
@@ -79,6 +85,18 @@ export class Player {
         }
     }
 
+    // Block until paused becomes false (or quit). Used for the CLI-mode
+    // "wait for right-arrow" gate, which needs to block regardless of
+    // delay — sleep() returns instantly for ms <= 0.
+    async waitForResume() {
+        while (this.paused && !this.quitRequested) {
+            await new Promise((r) => {
+                this._wake = r;
+            });
+            this._wake = null;
+        }
+    }
+
     async run() {
         const { events, opts } = this;
         if (events.length === 0) {
@@ -91,6 +109,7 @@ export class Player {
         // animated "Starting replay…" header.
         const toolResults = new Map();
         let firstModel = "";
+        let firstMode = "";
         for (const ev of events) {
             if (ev.type === "tool.execution_complete" && ev.data?.toolCallId) {
                 toolResults.set(ev.data.toolCallId, ev);
@@ -109,6 +128,23 @@ export class Player {
             ) {
                 firstModel = ev.data.model;
             }
+            if (
+                !firstMode &&
+                ev.type === "session.mode_changed" &&
+                ev.data?.previousMode
+            ) {
+                // The mode before the first change is the session's
+                // starting mode — that's what the CLI would have
+                // displayed before any user toggle.
+                firstMode = ev.data.previousMode;
+            }
+            if (
+                !firstMode &&
+                ev.type === "session.start" &&
+                ev.data?.mode
+            ) {
+                firstMode = ev.data.mode;
+            }
         }
         const ctx = {
             toolResults,
@@ -120,17 +156,36 @@ export class Player {
             events.find((e) => e.type === "session.start")?.data?.context
                 ?.cwd || "";
         const cwdText = cwdFromSession.replace(homedir(), "~");
+        // Configure cli-mode BEFORE enabling the layout so the first
+        // draw uses the correct (smaller) chrome height — otherwise
+        // layout.enable() lays out for 4 chrome rows and the shrink to
+        // 2 leaves stale cwd/rule rows above the gray input panel.
+        if (opts.cliMode) {
+            layout.setCliMode(true, firstModel || "");
+            if (firstMode) layout.setMode(firstMode);
+        }
         layout.enable(cwdText);
         layout.setSpeed(this.speed);
         layout.setPaused(this.paused);
 
-        // Initial pause: show the centered "Press SPACE to start replay"
-        // overlay until the user hits space.
-        await waitForStart(this);
-        if (this.quitRequested) {
-            layout.disable();
-            writeln(fg.gray("━ replay aborted"));
-            return;
+        // CLI mode: pristine empty screen (no banner, no "Press SPACE"
+        // overlay). Just wait for the first → press, then play through
+        // one user-prompt segment at a time.
+        if (opts.cliMode) {
+            await this.waitForResume();
+            if (this.quitRequested) {
+                layout.disable();
+                return;
+            }
+        } else {
+            // Initial pause: show the centered "Press SPACE to start
+            // replay" overlay until the user hits space.
+            await waitForStart(this);
+            if (this.quitRequested) {
+                layout.disable();
+                writeln(fg.gray("━ replay aborted"));
+                return;
+            }
         }
 
         let prevTs = null;
@@ -183,6 +238,31 @@ export class Player {
             if (!opts.include.has(ev.type)) {
                 i++;
                 continue;
+            }
+            // CLI mode: suppress the "Starting replay of session …"
+            // session.start animation (we showed a real-CLI banner
+            // instead) and gate advancement at each user.message on the
+            // → key budget so each press plays exactly one "user
+            // prompt → assistant work" segment.
+            if (opts.cliMode && ev.type === "session.start") {
+                i++;
+                continue;
+            }
+            if (
+                opts.cliMode &&
+                ev.type === "user.message" &&
+                !(ev.data?.source) &&
+                this._rewindTo == null &&
+                !this.stepNext &&
+                !this.seekNext
+            ) {
+                if (this._cliBudget <= 0) {
+                    this.paused = true;
+                    layout.setPaused(true);
+                    await this.waitForResume();
+                    if (this.quitRequested) break;
+                }
+                if (this._cliBudget > 0) this._cliBudget--;
             }
             const render = describeEvent(ev, opts, ctx);
             if (!render) {
@@ -253,6 +333,7 @@ export class Player {
         }
 
         layout.disable();
+        if (opts.cliMode) return;
         if (this.quitRequested) {
             writeln(fg.gray("━ replay aborted"));
         } else {

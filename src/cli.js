@@ -3,6 +3,7 @@
 
 import process from "node:process";
 import { fg } from "./ansi.js";
+import { detectAndApplyTheme } from "./theme.js";
 import {
     SESSION_STATE_DIR,
     listSessions,
@@ -28,6 +29,8 @@ export function parseArgs(argv) {
         list: false,
         help: false,
         showThinking: true,
+        theme: null,
+        cliMode: false,
         include: new Set([
             "user.message",
             "assistant.message",
@@ -65,6 +68,18 @@ export function parseArgs(argv) {
             case "--no-thinking":
                 args.showThinking = false;
                 break;
+            case "--cli-mode":
+            case "--realistic":
+                args.cliMode = true;
+                break;
+            case "--theme": {
+                const v = next();
+                if (v !== "light" && v !== "dark" && v !== "auto") {
+                    die(`--theme must be light|dark|auto (got ${v})`);
+                }
+                args.theme = v;
+                break;
+            }
             case "--include": {
                 const v = next();
                 if (v) for (const t of v.split(",")) args.include.add(t.trim());
@@ -90,6 +105,10 @@ export function parseArgs(argv) {
     if (!Number.isFinite(args.min) || args.min < 0) {
         die("--min must be a non-negative number");
     }
+    // CLI mode always runs at real-time 1×. Any --speed the user
+    // passed would defeat the "this looks like a real session"
+    // illusion, so we just force it.
+    if (args.cliMode) args.speed = 1;
     return args;
 }
 
@@ -106,6 +125,10 @@ export function printHelp() {
             `      --cap MS           Max delay between events in ms (default 3000)\n` +
             `      --min MS           Min delay between events in ms (default 30)\n` +
             `      --no-thinking      Hide assistant reasoning blocks\n` +
+            `      --cli-mode         Hide replay controls; show @files ·\n` +
+            `                         #issues + model name like the real CLI\n` +
+            `      --theme MODE       Color theme: light, dark, or auto\n` +
+            `                         (default: auto-detect via OSC 11 / COLORFGBG)\n` +
             `      --include TYPES    Comma-separated extra event types to show\n` +
             `      --exclude TYPES    Comma-separated event types to hide\n` +
             `  -h, --help             Show this help\n\n` +
@@ -145,6 +168,33 @@ export async function main() {
     }
 
     let target = resolveTarget(args.positional, { die });
+
+    // Early terminal-restore handler. Theme detection (and the picker)
+    // both put stdin into raw mode before main()'s comprehensive restore
+    // is wired up; without this, a Ctrl-C during that window would leave
+    // the user's shell stuck in raw mode. The full restore later is
+    // idempotent with this one.
+    const earlyRestore = () => {
+        try {
+            if (process.stdin.isTTY) process.stdin.setRawMode(false);
+        } catch {}
+        try {
+            process.stdin.pause();
+        } catch {}
+    };
+    process.once("SIGINT", () => {
+        earlyRestore();
+        process.exit(130);
+    });
+    process.once("SIGTERM", () => {
+        earlyRestore();
+        process.exit(143);
+    });
+
+    // Detect light/dark before any output so the splash, picker, and
+    // event stream all use the correct palette.
+    await detectAndApplyTheme(args.theme);
+
     if (!target) target = await pickSessionInteractive({ die });
 
     const events = loadEvents(target.eventsPath);

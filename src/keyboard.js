@@ -23,6 +23,19 @@ export function attachKeyHandlers(player) {
         // Multi-byte CSI escape sequences (arrows, function keys).
         if (data.startsWith("\x1b[") || data.startsWith("\x1bO")) {
             if (data === "\x1b[C") {
+                // CLI mode: → advances exactly one "user-prompt
+                // segment". Each press buys the right to render the
+                // next user.message plus everything up to (but not
+                // including) the one after it. See Player._cliBudget.
+                if (player.opts.cliMode) {
+                    player._cliBudget = (player._cliBudget || 0) + 1;
+                    if (player.paused) {
+                        player.paused = false;
+                        layout.setPaused(false);
+                    }
+                    player.wake();
+                    return;
+                }
                 // When paused, arrows step event-by-event so the presenter
                 // can narrate each thing that happens. When playing, they
                 // jump to the previous/next *user prompt* — the usual
@@ -32,6 +45,11 @@ export function attachKeyHandlers(player) {
                 player.skipRequested = true;
                 player.wake();
             } else if (data === "\x1b[D") {
+                if (player.opts.cliMode) {
+                    // Left arrow disabled in cli mode — rewinding
+                    // would defeat the "clean session" illusion.
+                    return;
+                }
                 if (player.paused) player.stepPrev = true;
                 else player.seekPrev = true;
                 player.skipRequested = true;
@@ -60,17 +78,20 @@ export function attachKeyHandlers(player) {
                     break;
                 case "+":
                 case "=":
+                    if (player.opts.cliMode) break;
                     player.speed = Math.min(64, player.speed * 1.5);
                     layout.setSpeed(player.speed);
                     player.wake();
                     break;
                 case "-":
                 case "_":
+                    if (player.opts.cliMode) break;
                     player.speed = Math.max(0.1, player.speed / 1.5);
                     layout.setSpeed(player.speed);
                     player.wake();
                     break;
                 case "0":
+                    if (player.opts.cliMode) break;
                     player.speed = player.defaultSpeed;
                     layout.setSpeed(player.speed);
                     player.wake();
