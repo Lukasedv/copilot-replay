@@ -107,10 +107,9 @@ export function parseArgs(argv) {
     if (!Number.isFinite(args.min) || args.min < 0) {
         die("--min must be a non-negative number");
     }
-    // CLI mode always runs at real-time 1×. Any --speed the user
-    // passed would defeat the "this looks like a real session"
-    // illusion, so we just force it.
-    if (args.cliMode) args.speed = 1;
+    // Interactive CLI mode runs at real-time 1× for the live-session
+    // illusion. Piped output still honors --speed and autoplays.
+    if (args.cliMode && process.stdout.isTTY) args.speed = 1;
     return args;
 }
 

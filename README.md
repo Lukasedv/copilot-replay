@@ -125,7 +125,7 @@ replies, tool output) is scaled by the playback speed.
 | `--min MS` | `30` | Min delay between events. |
 | `--no-thinking` | off | Hide assistant reasoning blocks. |
 | `--theme MODE` | `auto` | Color palette: `light`, `dark`, or `auto`. Auto-detect uses `COLORFGBG` then OSC 11 query, falls back to `dark`. Override with `COPILOT_REPLAY_THEME=light\|dark`. |
-| `--cli-mode` / `--realistic` | off | Present the replay as a live Copilot CLI session: real-CLI banner, no replay chrome, `@ files · # issues` plus model name in the footer. Press `→` to play one user-prompt segment; `space` still pauses. Speed is locked at 1×. |
+| `--cli-mode` / `--realistic` | off | Match the current Copilot CLI with Session/Issues/Pull requests/Gists tabs, the Copilot mascot, rail-style live input, framed prompts, compact tool rows, and project/model/reasoning metadata. In a TTY, press `→` to play one user-prompt segment; `space` still pauses and speed is locked at 1×. Piped output autoplays at `--speed`. |
 | `--include TYPES` | — | Comma-separated extra event types to show. |
 | `--exclude TYPES` | — | Comma-separated event types to hide. |
 | `-h, --help` | — | Show usage. |
@@ -144,6 +144,11 @@ While a replay is running, the terminal is carved into two regions:
 - A **sticky footer** at the bottom that mirrors the real CLI's chrome:
   cwd line, the input box where user prompts get typed, and a status bar
   with the current speed and the live key bindings.
+
+In CLI mode, the current Copilot tab strip stays above the timeline. The
+footer switches between `/ commands · ? help` and `@ files · # issues`,
+shows the branch plus model/reasoning context, and uses blue, purple, or
+amber accents for plan, autopilot, and shell modes.
 
 User prompts are typed into the footer input box one character at a time,
 then committed up into the scroll history exactly like the real CLI does
@@ -218,4 +223,3 @@ MIT © Lukas Lundin. See [LICENSE](LICENSE).
 
 Made by [Lukas Lundin](https://github.com/lukasedv), Software Solution
 Engineer at Microsoft.
-

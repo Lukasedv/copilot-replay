@@ -15,8 +15,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `COPILOT_REPLAY_THEME`, OSC 11 auto-detection).
 - Input prompt rendered in a gray bg panel matching the real CLI.
 - MCP / plugin tool results suppressed (compact one-liner instead).
-- Mode-accent coloring: `plan` → cyan, `autopilot` → green chevron,
-  cursor, and status bar. Status bar shows `/ commands · ? help`.
+- Current Copilot tab strip, mascot header, rail-style live prompt, and
+  half-block submitted-prompt frames in CLI mode.
+- Compact current-CLI timeline rows for file, shell, search, agent, and MCP
+  tools, plus collapsed `Thought for Ns` reasoning rows.
+- Current event metadata support for the selected model, Copilot version,
+  branch, reasoning effort, and context tier.
+- Mode-accent coloring: `plan` → blue, `autopilot` → purple, and `shell` →
+  amber. Footer hints switch between `/ commands · ? help` and
+  `@ files · # issues`.
 
 ### Fixed
 - Skill-injected `user.message` events (with a `source` field) are

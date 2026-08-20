@@ -337,8 +337,7 @@ class Layout {
             modeLabel && modeLabel !== "interactive" && modeLabel !== "standard";
         const sep = fg.gray("·");
         const segs = [];
-        const playback = this.paused ? fg.yellow("⏸") : fg.green("▶");
-        segs.push(`${playback} ${fg.bold(fg.white(formatSpeed(this.speed)))}`);
+        segs.push(fg.bold(fg.white(formatSpeed(this.speed))));
         if (showMode) segs.push(paint(modeLabel));
         if (this.typed) {
             segs.push(`${paint("@")} ${fg.dim("files")}`);

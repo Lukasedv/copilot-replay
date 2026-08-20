@@ -187,7 +187,7 @@ export class Player {
 
         // CLI mode starts at the current Copilot header and waits for the
         // first → press, then plays one user-prompt segment at a time.
-        if (opts.cliMode) {
+        if (opts.cliMode && isTTY) {
             await this.waitForResume();
             if (this.quitRequested) {
                 layout.disable();
@@ -266,6 +266,7 @@ export class Player {
             }
             if (
                 opts.cliMode &&
+                isTTY &&
                 ev.type === "user.message" &&
                 !(ev.data?.source) &&
                 this._rewindTo == null &&
