@@ -46,6 +46,13 @@ function paintSelectedTab(body) {
     return `${open}${stripped}${ANSI_RESET}`;
 }
 
+function clipText(text, max) {
+    const value = String(text ?? "");
+    if (value.length <= max) return value;
+    if (max <= 1) return "…".slice(0, max);
+    return `${value.slice(0, max - 1)}…`;
+}
+
 class Layout {
     constructor() {
         this.active = false;
@@ -268,7 +275,7 @@ class Layout {
         // Row: project context
         rawWrite(`\x1b[${start};1H\x1b[2K`);
         const project = [this.cwd, this.branch].filter(Boolean).join("  ");
-        rawWrite(`  ${fg.gray(project)}`);
+        rawWrite(`  ${fg.gray(clipText(project, Math.max(1, W - 2)))}`);
         let row = start + 1;
         // Replay mode has a ── rule. Current CLI mode uses a colored rail
         // beside a half-block border around the secondary background.
@@ -365,7 +372,9 @@ class Layout {
         const effort = effortLabels[this.reasoningEffort];
         if (effort) metadata.push(effort);
         if (this.contextTier === "long_context") metadata.push("long context");
-        const right = fg.gray(metadata.join(" · "));
+        const available = this.cols - stripAnsi(left).length - 1;
+        if (available <= 0) return left;
+        const right = fg.gray(clipText(metadata.join(" · "), available));
         const gap = Math.max(
             1,
             this.cols - stripAnsi(left).length - stripAnsi(right).length,
@@ -497,9 +506,14 @@ class Layout {
             return;
         }
         const beforeLines = this._wrapTyped();
+        const wasEmpty = this.typed.length === 0;
         this.typed += ch;
         const afterLines = this._wrapTyped();
 
+        if (this.cliMode && wasEmpty) {
+            this.redrawFooter();
+            return;
+        }
         if (afterLines.length !== this.inputRows) {
             this._ensureInputRows(afterLines.length);
             this.redrawFooter();

@@ -710,7 +710,8 @@ export function describeEvent(ev, opts, ctx) {
                     if (player.quitRequested) return;
                     const lines = [...renderMarkdownLines(content, 2)];
                     if (lines.length > 0) {
-                        writeln(`${fg.magenta(BULLET)} ${lines[0]}`);
+                        const dotColor = opts.cliMode ? fg.blue : fg.magenta;
+                        writeln(`${dotColor(BULLET)} ${lines[0]}`);
                         await streamLines(lines.slice(1), player, {
                             indent: "  ",
                             perLineMs: 30,
@@ -761,7 +762,7 @@ export function describeEvent(ev, opts, ctx) {
                     await emitAskUser(d, resultEv?.data, player);
                 };
             }
-            if (opts.cliMode && toolName !== "task_complete") {
+            if (opts.cliMode) {
                 return () =>
                     emitCompactTool(toolName, d.arguments, resultEv?.data);
             }
