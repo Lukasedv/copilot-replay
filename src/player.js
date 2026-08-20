@@ -8,10 +8,11 @@
 
 import { homedir } from "node:os";
 import { isTTY, fg } from "./ansi.js";
-import { rawWrite, writeln } from "./io.js";
+import { writeln } from "./io.js";
 import { layout } from "./layout.js";
 import { waitForStart } from "./anim.js";
 import { describeEvent } from "./render.js";
+import { renderCliBannerLines } from "./banner.js";
 
 export class Player {
     constructor(events, opts) {
@@ -108,7 +109,9 @@ export class Player {
         // rendering. Also discover the session's first model for the
         // animated "Starting replay…" header.
         const toolResults = new Map();
-        let firstModel = "";
+        const startData =
+            events.find((event) => event.type === "session.start")?.data || {};
+        let firstModel = startData.selectedModel || startData.model || "";
         let firstMode = "";
         for (const ev of events) {
             if (ev.type === "tool.execution_complete" && ev.data?.toolCallId) {
@@ -120,13 +123,6 @@ export class Player {
                 ev.data?.newModel
             ) {
                 firstModel = ev.data.newModel;
-            }
-            if (
-                !firstModel &&
-                ev.type === "session.start" &&
-                ev.data?.model
-            ) {
-                firstModel = ev.data.model;
             }
             if (
                 !firstMode &&
@@ -152,9 +148,7 @@ export class Player {
             sessionId: opts.sessionId || "",
         };
 
-        const cwdFromSession =
-            events.find((e) => e.type === "session.start")?.data?.context
-                ?.cwd || "";
+        const cwdFromSession = startData.context?.cwd || "";
         const cwdText = cwdFromSession.replace(homedir(), "~");
         // Configure cli-mode BEFORE enabling the layout so the first
         // draw uses the correct (smaller) chrome height — otherwise
@@ -162,15 +156,23 @@ export class Player {
         // 2 leaves stale cwd/rule rows above the gray input panel.
         if (opts.cliMode) {
             layout.setCliMode(true, firstModel || "");
+            layout.setSessionInfo({
+                model: firstModel,
+                branch: startData.context?.branch || "",
+                reasoningEffort: startData.reasoningEffort || "",
+                contextTier: startData.contextTier || "",
+            });
+            layout.setCliHeader(
+                renderCliBannerLines(startData.copilotVersion || "unknown"),
+            );
             if (firstMode) layout.setMode(firstMode);
         }
         layout.enable(cwdText);
         layout.setSpeed(this.speed);
         layout.setPaused(this.paused);
 
-        // CLI mode: pristine empty screen (no banner, no "Press SPACE"
-        // overlay). Just wait for the first → press, then play through
-        // one user-prompt segment at a time.
+        // CLI mode starts at the current Copilot header and waits for the
+        // first → press, then plays one user-prompt segment at a time.
         if (opts.cliMode) {
             await this.waitForResume();
             if (this.quitRequested) {
@@ -375,10 +377,8 @@ export class Player {
         // be re-walked from event 0 up to `target` without leftover text.
         layout.clearTyped();
         if (layout.active) {
-            for (let r = 1; r <= layout.scrollBottomRow; r++) {
-                rawWrite(`\x1b[${r};1H\x1b[2K`);
-            }
-            rawWrite(`\x1b[${layout.scrollBottomRow};1H`);
+            layout.clearContent();
+            layout.redrawCliHeader();
         }
         this._rewindTo = target;
     }

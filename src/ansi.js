@@ -10,8 +10,8 @@ export const NO_COLOR = !!process.env.NO_COLOR || !isTTY;
 
 export const ESC = "\x1b[";
 
-// Two palettes of 256-color SGR codes, picked so each role has acceptable
-// contrast (~4.5:1 minimum for body text) on its target background.
+// Theme-aware SGR roles, picked so each role has acceptable contrast
+// (~4.5:1 minimum for body text) on its target background.
 //
 // The "white" slot is semantically "primary readable text" — on a dark
 // background that's near-white, on a light background it collapses to
@@ -25,7 +25,12 @@ const PALETTES = {
         green: "38;5;114",
         yellow: "38;5;215",
         orange: "38;5;209",
-        blue: "38;5;75",
+        blue: "38;2;68;147;248",
+        plan: "38;2;47;129;247",
+        purple: "38;2;164;117;249",
+        interactive: "38;2;129;139;152",
+        panelBorder: "38;2;20;27;34",
+        selectedText: "38;2;255;255;255",
         cyan: "38;5;87",
         magenta: "38;5;176",
         white: "38;5;255",
@@ -37,7 +42,12 @@ const PALETTES = {
         green: "38;5;28",
         yellow: "38;5;130",
         orange: "38;5;166",
-        blue: "38;5;26",
+        blue: "38;2;9;105;218",
+        plan: "38;2;9;105;218",
+        purple: "38;2;130;80;223",
+        interactive: "38;2;87;96;106",
+        panelBorder: "38;2;232;233;235",
+        selectedText: "38;2;255;255;255",
         cyan: "38;5;30",
         magenta: "38;5;90",
         white: "38;5;232",
@@ -45,13 +55,14 @@ const PALETTES = {
 };
 
 const BG_PALETTES = {
-    // Subtle panels only — the input box bg should be visibly distinct
-    // from the scroll region but not compete with the text. These are
-    // two shades off the terminal bg on each theme: dark uses 235
-    // (one step lighter than typical terminal black), light uses 254
-    // (one step darker than typical #fbfbfa paper).
-    dark: { gray: "48;5;235" },
-    light: { gray: "48;5;254" },
+    dark: {
+        gray: "48;2;20;27;34",
+        selected: "48;2;9;105;218",
+    },
+    light: {
+        gray: "48;2;232;233;235",
+        selected: "48;2;9;105;218",
+    },
 };
 
 let currentTheme = "dark";
@@ -103,6 +114,11 @@ export const fg = {
     yellow: fgPaint("yellow"),
     orange: fgPaint("orange"),
     blue: fgPaint("blue"),
+    plan: fgPaint("plan"),
+    purple: fgPaint("purple"),
+    interactive: fgPaint("interactive"),
+    panelBorder: fgPaint("panelBorder"),
+    selectedText: fgPaint("selectedText"),
     cyan: fgPaint("cyan"),
     magenta: fgPaint("magenta"),
     white: fgPaint("white"),
@@ -110,6 +126,7 @@ export const fg = {
 
 export const bg = {
     gray: bgPaint("gray"),
+    selected: bgPaint("selected"),
 };
 
 // Opening SGR code for a bg color, without the trailing reset. Lets
