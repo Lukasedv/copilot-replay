@@ -109,14 +109,27 @@ export class Player {
         // rendering. Also discover the session's first model for the
         // animated "Starting replay…" header.
         const toolResults = new Map();
+        const reasoningDurations = new Map();
         const startData =
             events.find((event) => event.type === "session.start")?.data || {};
         let firstModel = startData.selectedModel || startData.model || "";
         let firstMode = "";
+        let turnStartedAt = null;
         for (const ev of events) {
             if (ev.type === "tool.execution_complete" && ev.data?.toolCallId) {
                 toolResults.set(ev.data.toolCallId, ev);
             }
+            if (ev.type === "assistant.turn_start") {
+                const timestamp = Date.parse(ev.timestamp);
+                turnStartedAt = Number.isFinite(timestamp) ? timestamp : null;
+            }
+            if (ev.type === "assistant.reasoning" && turnStartedAt != null) {
+                const timestamp = Date.parse(ev.timestamp);
+                if (Number.isFinite(timestamp)) {
+                    reasoningDurations.set(ev.id, timestamp - turnStartedAt);
+                }
+            }
+            if (ev.type === "assistant.turn_end") turnStartedAt = null;
             if (
                 !firstModel &&
                 ev.type === "session.model_change" &&
@@ -144,6 +157,7 @@ export class Player {
         }
         const ctx = {
             toolResults,
+            reasoningDurations,
             firstModel,
             sessionId: opts.sessionId || "",
         };

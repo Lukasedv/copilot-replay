@@ -26,6 +26,11 @@ function emitDotLine(dotColor, text, bodyColor = fg.white) {
     writeln(`${dotColor(BULLET)} ${bodyColor(text)}`);
 }
 
+function thoughtDuration(ms) {
+    if (!Number.isFinite(ms) || ms < 0) return "";
+    return `${Math.max(1, Math.round(ms / 1000))}s`;
+}
+
 export function emitInfo(text) {
     emitDotLine(fg.cyan, text, fg.cyan);
 }
@@ -232,7 +237,10 @@ export function defaultToolTitle(name, args) {
 
 function emitToolResult(name, data) {
     if (data?.success === false) {
-        const err = truncate(String(data.error ?? "failed"), 300);
+        const err = truncate(
+            String(data.error?.message ?? data.error ?? "failed"),
+            300,
+        );
         writeln(`  ${fg.red("⎿")} ${fg.red(err)}`);
         return;
     }
@@ -277,6 +285,106 @@ function emitToolStart(name, args, resultData) {
         }
     }
     if (resultData) emitToolResult(name, resultData);
+}
+
+const SHELL_TOOLS = new Set([
+    "bash",
+    "shell",
+    "local_shell",
+    "powershell",
+    "read_bash",
+    "write_bash",
+]);
+
+const SEARCH_TOOLS = new Set(["grep", "rg", "glob", "web_search"]);
+
+function compactSearchDescription(name, args) {
+    const a = args && typeof args === "object" ? args : {};
+    if (name === "web_search") return truncate(String(a.query ?? ""), 180);
+    const pattern = String(a.pattern ?? a.query ?? "");
+    if (!pattern) return "";
+    if (name === "glob") return `"${truncate(pattern, 120)}"`;
+    const location = a.path ? shortenPath(String(a.path)) : "files";
+    return `"${truncate(pattern, 120)}" in ${location}`;
+}
+
+function compactFileStats(name, args, resultData) {
+    const a = args && typeof args === "object" ? args : {};
+    if (name === "create") {
+        const lines = countLines(String(a.file_text ?? a.content ?? ""));
+        return lines > 0 ? { added: lines, removed: 0 } : null;
+    }
+    if (name !== "edit" && name !== "apply_patch") return null;
+    const detailed = resultData?.result?.detailedContent ?? "";
+    const patch = String(a.patch ?? "");
+    const parsed = parseDiffStats(detailed) || parseDiffStats(patch);
+    if (parsed) return parsed;
+    const oldLines = countLines(String(a.old_str ?? ""));
+    const newLines = countLines(String(a.new_str ?? ""));
+    return oldLines || newLines
+        ? { added: newLines, removed: oldLines }
+        : null;
+}
+
+function emitCompactTool(name, args, resultData) {
+    const a = args && typeof args === "object" ? args : {};
+    const failed = resultData?.success === false;
+    let icon = BULLET;
+    let iconColor = failed ? fg.red : fg.green;
+    let title = name;
+    let description = "";
+    let stats = null;
+
+    if (["view", "show_file"].includes(name)) {
+        title = "Read";
+        description = baseFromPath(a.path) || "file";
+    } else if (name === "create") {
+        title = "Create";
+        description = baseFromPath(a.path) || "file";
+        stats = compactFileStats(name, a, resultData);
+    } else if (name === "edit" || name === "apply_patch") {
+        title = "Edit";
+        description = baseFromPath(a.path) || (name === "apply_patch" ? "files" : "file");
+        stats = compactFileStats(name, a, resultData);
+    } else if (SHELL_TOOLS.has(name)) {
+        icon = "$";
+        iconColor = failed ? fg.red : fg.yellow;
+        title = "Shell";
+        description = truncate(
+            String(a.description ?? a.command ?? a.input ?? ""),
+            180,
+        ).replace(/\s+/g, " ");
+    } else if (SEARCH_TOOLS.has(name)) {
+        icon = "/";
+        iconColor = failed ? fg.red : fg.gray;
+        title = "Search";
+        description = compactSearchDescription(name, a);
+    } else if (name === "task") {
+        title = "Agent";
+        description = truncate(String(a.description ?? a.name ?? ""), 180);
+    } else if (isMcpTool(name)) {
+        title = name;
+        description = mcpToolSummary(a);
+    } else {
+        title = defaultToolTitle(name, a);
+        description = summarizeToolArgs(name, a);
+    }
+
+    if (failed) {
+        icon = "✗";
+        const error = String(
+            resultData?.error?.message ?? resultData?.error ?? "failed",
+        );
+        description = description
+            ? `${description} — ${truncate(error, 100)}`
+            : truncate(error, 180);
+    }
+
+    let line = `${iconColor(icon)} ${fg.bold(fg.white(title))}`;
+    if (description) line += ` ${fg.white(description)}`;
+    if (stats?.added) line += ` ${fg.green(`+${stats.added}`)}`;
+    if (stats?.removed) line += ` ${fg.red(`-${stats.removed}`)}`;
+    writeln(line);
 }
 
 // ── Specialized tool renderers ─────────────────────────────────────────
@@ -581,17 +689,21 @@ export function describeEvent(ev, opts, ctx) {
             if (!reasoning && !content) return null;
             return async (player) => {
                 if (reasoning && opts.showThinking) {
-                    await animateThinking(player, reasoning);
-                    if (player.quitRequested) return;
-                    writeln(
-                        `${fg.magenta(BULLET)} ` +
-                            `${fg.dim(fg.magenta("Thinking"))}`,
-                    );
-                    const lines = [...renderMarkdownLines(reasoning, 2)];
-                    await streamLines(lines, player, {
-                        indent: "  ",
-                        perLineMs: 25,
-                    });
+                    if (opts.cliMode) {
+                        writeln(`${fg.blue("❯")} ${fg.gray("Thought")}`);
+                    } else {
+                        await animateThinking(player, reasoning);
+                        if (player.quitRequested) return;
+                        writeln(
+                            `${fg.magenta(BULLET)} ` +
+                                `${fg.dim(fg.magenta("Thinking"))}`,
+                        );
+                        const lines = [...renderMarkdownLines(reasoning, 2)];
+                        await streamLines(lines, player, {
+                            indent: "  ",
+                            perLineMs: 25,
+                        });
+                    }
                 }
                 if (content) {
                     if (reasoning) writeln("");
@@ -607,6 +719,34 @@ export function describeEvent(ev, opts, ctx) {
                 }
             };
         }
+        case "assistant.reasoning_delta":
+            return null;
+        case "assistant.reasoning": {
+            const reasoning = String(d.content ?? "").trim();
+            if (!reasoning || !opts.showThinking) return null;
+            return async (player) => {
+                if (opts.cliMode) {
+                    const duration = thoughtDuration(
+                        ctx?.reasoningDurations?.get(ev.id),
+                    );
+                    const label = duration
+                        ? `Thought for ${duration}`
+                        : "Thought";
+                    writeln(`${fg.blue("❯")} ${fg.gray(label)}`);
+                    return;
+                }
+                await animateThinking(player, reasoning);
+                if (player.quitRequested) return;
+                writeln(
+                    `${fg.magenta(BULLET)} ${fg.dim(fg.magenta("Thinking"))}`,
+                );
+                const lines = [...renderMarkdownLines(reasoning, 2)];
+                await streamLines(lines, player, {
+                    indent: "  ",
+                    perLineMs: 25,
+                });
+            };
+        }
         case "tool.execution_start": {
             const resultEv = ctx?.toolResults?.get(d.toolCallId);
             const toolName = d.toolName ?? "tool";
@@ -620,6 +760,10 @@ export function describeEvent(ev, opts, ctx) {
                 return async (player) => {
                     await emitAskUser(d, resultEv?.data, player);
                 };
+            }
+            if (opts.cliMode && toolName !== "task_complete") {
+                return () =>
+                    emitCompactTool(toolName, d.arguments, resultEv?.data);
             }
             if (toolName === "create") {
                 return () => emitCreateFile(d.arguments);
@@ -655,7 +799,20 @@ export function describeEvent(ev, opts, ctx) {
             };
         case "session.model_change":
             return () => {
-                if (d.newModel) layout.setModel(String(d.newModel));
+                layout.setSessionInfo({
+                    model:
+                        typeof d.newModel === "string"
+                            ? d.newModel
+                            : undefined,
+                    reasoningEffort:
+                        typeof d.reasoningEffort === "string"
+                            ? d.reasoningEffort
+                            : undefined,
+                    contextTier:
+                        typeof d.contextTier === "string"
+                            ? d.contextTier
+                            : undefined,
+                });
                 if (opts?.cliMode) return;
                 emitModelChange(d.previousModel, d.newModel);
             };
