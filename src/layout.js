@@ -32,11 +32,21 @@ export const MAX_INPUT_ROWS = 10;
 // resets from `body` so the bg persists across embedded fg color codes
 // (each `fg.*` ends in a reset, which would otherwise cancel the outer
 // bg mid-line). The single trailing reset at the end restores defaults.
-function paintInputBg(body) {
-    const open = bgOpen("gray");
+function paintBg(body, name) {
+    const open = bgOpen(name);
     if (!open) return String(body);
     const stripped = String(body).replace(/\x1b\[0m/g, "");
     return `${open}${stripped}${ANSI_RESET}`;
+}
+
+const paintInputBg = (body) => paintBg(body, "gray");
+const paintSelectedTab = (body) => paintBg(body, "selected");
+
+function clipText(text, max) {
+    const value = String(text ?? "");
+    if (value.length <= max) return value;
+    if (max <= 1) return "…".slice(0, max);
+    return `${value.slice(0, max - 1)}…`;
 }
 
 class Layout {
@@ -54,6 +64,10 @@ class Layout {
         this.inputRows = 1;
         this.cliMode = false;
         this.model = "";
+        this.branch = "";
+        this.reasoningEffort = "";
+        this.contextTier = "";
+        this.cliHeader = [];
         // Session agent mode ("interactive", "plan", "autopilot", …).
         // In --cli-mode we show this as a small label in the status bar
         // where the real CLI shows it, instead of emitting
@@ -70,6 +84,8 @@ class Layout {
                 for (let r = 1; r <= this.scrollBottomRow; r++) {
                     rawWrite(`\x1b[${r};1H\x1b[2K`);
                 }
+                this._renderCliTabs();
+                this.redrawCliHeader();
                 this.redrawFooter();
                 if (this.overlayDraw) this.overlayDraw();
                 rawWrite(`\x1b[${this.scrollBottomRow};1H`);
@@ -91,8 +107,12 @@ class Layout {
         return this._chromeH + this.inputRows;
     }
 
+    get scrollTopRow() {
+        return this.cliMode ? 3 : 1;
+    }
+
     get scrollBottomRow() {
-        return Math.max(1, this.rows - this.footerH);
+        return Math.max(this.scrollTopRow, this.rows - this.footerH);
     }
 
     get isTTY() {
@@ -106,6 +126,8 @@ class Layout {
         rawWrite("\x1b[?25l"); // hide cursor
         rawWrite("\x1b[2J\x1b[H"); // clear screen
         this._setRegion();
+        this._renderCliTabs();
+        this.redrawCliHeader();
         this.redrawFooter();
         rawWrite(`\x1b[${this.scrollBottomRow};1H`);
         if (STREAM.on) STREAM.on("resize", this._onResize);
@@ -121,7 +143,35 @@ class Layout {
     }
 
     _setRegion() {
-        rawWrite(`\x1b[1;${this.scrollBottomRow}r`);
+        rawWrite(`\x1b[${this.scrollTopRow};${this.scrollBottomRow}r`);
+    }
+
+    _renderCliTabs() {
+        if (!this.cliMode || !this.active) return;
+        const active = paintSelectedTab(fg.bold(fg.selectedText(" Session ")));
+        const tabs = ["Issues", "Pull requests", "Gists"]
+            .map((label) => fg.gray(` ${label} `))
+            .join(" ");
+        rawWrite(`\x1b[1;1H\x1b[2K ${active} ${tabs}`);
+        rawWrite("\x1b[2;1H\x1b[2K");
+    }
+
+    clearContent() {
+        if (!this.active) return;
+        for (let r = this.scrollTopRow; r <= this.scrollBottomRow; r++) {
+            rawWrite(`\x1b[${r};1H\x1b[2K`);
+        }
+        rawWrite(`\x1b[${this.scrollBottomRow};1H`);
+    }
+
+    redrawCliHeader() {
+        if (!this.active || !this.cliMode || this.cliHeader.length === 0) return;
+        const available = this.scrollBottomRow - this.scrollTopRow + 1;
+        const lines = this.cliHeader.slice(0, available);
+        for (let i = 0; i < lines.length; i++) {
+            rawWrite(`\x1b[${this.scrollTopRow + i};1H\x1b[2K${lines[i]}`);
+        }
+        rawWrite(`\x1b[${this.scrollBottomRow};1H`);
     }
 
     footerWidth() {
@@ -198,15 +248,13 @@ class Layout {
         rawWrite(`\x1b[${this.scrollBottomRow};1H`);
     }
 
-    // Resolve an accent fg wrapper for the current cli-mode mode name.
-    // plan → cyan, autopilot → green; other modes (including empty /
-    // "interactive") fall back to the primary text color so the chevron
-    // and cursor stay readable without implying a mode.
+    // Resolve the current Copilot CLI mode color.
     _modeAccent() {
         const m = (this.mode || "").trim().toLowerCase();
-        if (m === "plan") return fg.cyan;
-        if (m === "autopilot") return fg.green;
-        return fg.white;
+        if (m === "plan") return fg.plan;
+        if (m === "autopilot") return fg.purple;
+        if (m === "shell") return fg.yellow;
+        return fg.interactive;
     }
 
     redrawFooter() {
@@ -220,55 +268,59 @@ class Layout {
         const cliMode = this.cliMode;
         const accent = cliMode ? this._modeAccent() : fg.white;
         rawWrite("\x1b7");
-        // Row: cwd
+        // Row: project context
         rawWrite(`\x1b[${start};1H\x1b[2K`);
-        rawWrite(`  ${fg.cyan(this.cwd || "")}`);
+        const project = [this.cwd, this.branch].filter(Boolean).join("  ");
+        rawWrite(`  ${fg.gray(clipText(project, Math.max(1, W - 2)))}`);
         let row = start + 1;
-        // Replay mode has a ── rule between cwd and the input box; cli
-        // mode frames the gray input panel with a plain blank row.
+        // Replay mode has a ── rule. Current CLI mode uses a colored rail
+        // beside a half-block border around the secondary background.
         if (!cliMode) {
             rawWrite(`\x1b[${row};1H\x1b[2K`);
             rawWrite(rule);
         } else {
             rawWrite(`\x1b[${row};1H\x1b[2K`);
+            rawWrite(
+                `${accent("╻")}${fg.panelBorder("▄".repeat(Math.max(0, W - 1)))}`,
+            );
         }
         row++;
-        // Input rows (gray bg panel in cli mode; plain in replay).
+        // Input rows (rail + gray panel in cli mode; plain in replay).
         for (let i = 0; i < this.inputRows; i++) {
             rawWrite(`\x1b[${row};1H\x1b[2K`);
             const line = lines[i] ?? "";
-            // First row: "› " (cli, accented) or "> " (replay).
-            // Continuation rows indent 2 spaces.
             let body;
-            if (i === 0) {
-                const chev = cliMode ? accent("›") : fg.white(">");
+            if (!cliMode && i === 0) {
+                const chev = fg.white(">");
                 body = `${chev} ${fg.white(line)}`;
+            } else if (cliMode) {
+                body = ` ${fg.white(line)}`;
             } else {
                 body = `  ${fg.white(line)}`;
             }
-            // CLI mode: draw a block cursor after the text on the last
-            // input row, in the mode's accent color. Using explicit
-            // "bg=accent fg=accent space" instead of reverse-video so
-            // the cursor keeps the mode's color on light *and* dark
-            // themes, matching the real Copilot CLI.
             if (cliMode && i === this.inputRows - 1) {
-                body += accent("\u2588");
+                body += accent("│");
             }
             const visibleLen = stripAnsi(body).length;
-            const pad = Math.max(0, this.cols - visibleLen);
+            const pad = Math.max(0, W - 1 - visibleLen);
             if (cliMode) {
-                rawWrite(paintInputBg(body + " ".repeat(pad)));
+                rawWrite(
+                    `${accent("┃")}${paintInputBg(body + " ".repeat(pad))}`,
+                );
             } else {
                 rawWrite(body);
             }
             row++;
         }
-        // Closing chrome row: ── rule (replay) or plain blank (cli).
+        // Closing chrome row.
         if (!cliMode) {
             rawWrite(`\x1b[${row};1H\x1b[2K`);
             rawWrite(rule);
         } else {
             rawWrite(`\x1b[${row};1H\x1b[2K`);
+            rawWrite(
+                `${accent("╹")}${fg.panelBorder("▀".repeat(Math.max(0, W - 1)))}`,
+            );
         }
         row++;
         // Status bar.
@@ -282,25 +334,43 @@ class Layout {
     }
 
     _renderCliStatusBar(accent) {
-        // Match the real Copilot CLI status line:
-        //   standard:  / commands · ? help
-        //   plan:      plan · / commands · ? help           (teal)
-        //   autopilot: autopilot · / commands · ? help      (green)
-        //   right:     Hidden Model (or actual model name)  (gray)
         const paint = accent || this._modeAccent();
         const modeLabel = (this.mode || "").trim().toLowerCase();
         const showMode =
             modeLabel && modeLabel !== "interactive" && modeLabel !== "standard";
         const sep = fg.gray("·");
         const segs = [];
+        segs.push(fg.bold(fg.white(formatSpeed(this.speed))));
         if (showMode) segs.push(paint(modeLabel));
-        segs.push(`${paint("/")} ${fg.dim("commands")}`);
-        segs.push(`${paint("?")} ${fg.dim("help")}`);
+        if (this.typed) {
+            segs.push(`${paint("@")} ${fg.dim("files")}`);
+            segs.push(`${paint("#")} ${fg.dim("issues")}`);
+        } else {
+            segs.push(`${paint("/")} ${fg.dim("commands")}`);
+            if (modeLabel !== "autopilot") {
+                segs.push(`${paint("?")} ${fg.dim("help")}`);
+            }
+        }
         const left = segs.join(`  ${sep}  `);
         const rawModel = (this.model || "").trim();
         const modelName =
             !rawModel || rawModel === "unknown" ? "Hidden Model" : rawModel;
-        const right = fg.gray(modelName);
+        const effortLabels = {
+            none: "None",
+            minimal: "Minimal",
+            low: "Low",
+            medium: "Medium",
+            high: "High",
+            xhigh: "Extra High",
+            max: "Max",
+        };
+        const metadata = [modelName];
+        const effort = effortLabels[this.reasoningEffort];
+        if (effort) metadata.push(effort);
+        if (this.contextTier === "long_context") metadata.push("long context");
+        const available = this.cols - stripAnsi(left).length - 1;
+        if (available <= 0) return left;
+        const right = fg.gray(clipText(metadata.join(" · "), available));
         const gap = Math.max(
             1,
             this.cols - stripAnsi(left).length - stripAnsi(right).length,
@@ -379,6 +449,23 @@ class Layout {
         rawWrite(`\x1b[${this.scrollBottomRow};1H`);
     }
 
+    setSessionInfo({ model, branch, reasoningEffort, contextTier } = {}) {
+        if (typeof model === "string") this.model = model;
+        if (typeof branch === "string") this.branch = branch;
+        if (typeof reasoningEffort === "string") {
+            this.reasoningEffort = reasoningEffort.toLowerCase();
+        }
+        if (typeof contextTier === "string") {
+            this.contextTier = contextTier.toLowerCase();
+        }
+        if (this.active && this.cliMode) this.redrawFooter();
+    }
+
+    setCliHeader(lines) {
+        this.cliHeader = Array.isArray(lines) ? lines : [];
+        this.redrawCliHeader();
+    }
+
     setModel(model) {
         if (typeof model !== "string") return;
         this.model = model;
@@ -415,9 +502,14 @@ class Layout {
             return;
         }
         const beforeLines = this._wrapTyped();
+        const wasEmpty = this.typed.length === 0;
         this.typed += ch;
         const afterLines = this._wrapTyped();
 
+        if (this.cliMode && wasEmpty) {
+            this.redrawFooter();
+            return;
+        }
         if (afterLines.length !== this.inputRows) {
             this._ensureInputRows(afterLines.length);
             this.redrawFooter();
@@ -439,17 +531,18 @@ class Layout {
         if (suffix.length === 0) return;
 
         const start = this.rows - this.footerH + 1;
-        // In replay mode the first input row sits below cwd + top rule
-        // (offset 2); in cli mode there's no top rule (offset 1).
-        // Both replay and cli mode have one chrome row above the
-        // first input row (rule or blank), so input starts at +2.
+        // Both modes have one chrome row between cwd and the first input row.
         const inputRow0 = start + 2;
         const row = inputRow0 + lastIdx;
-        // Both first row ("> ") and continuation rows ("  ") start
-        // content at column 3.
+        // Replay content follows "> "; CLI content follows the rail and
+        // the panel's left padding. Both begin at column 3.
         const col = 3 + beforeLast.length;
         rawWrite("\x1b7");
-        rawWrite(`\x1b[${row};${col}H${paintInputBg(fg.white(suffix))}`);
+        const typed =
+            this.cliMode
+                ? paintInputBg(`${fg.white(suffix)}${this._modeAccent()("│")}`)
+                : fg.white(suffix);
+        rawWrite(`\x1b[${row};${col}H${typed}`);
         rawWrite("\x1b8");
     }
 
@@ -482,20 +575,18 @@ class Layout {
         const out = (s) => this.scrollWriteln(s);
         out("");
         if (this.cliMode) {
-            // Committed prompts look like a gray panel in the feed,
-            // identical in shape to the live input box: just the text
-            // rows painted with the input bg, framed by the surrounding
-            // blank scroll-region rows. The accent-colored chevron
-            // matches the mode that was active when the prompt was sent.
             const accent = this._modeAccent();
+            out(fg.panelBorder("▄".repeat(W)));
             for (let i = 0; i < wrapped.length; i++) {
-                const body = i === 0
-                    ? `${accent("›")} ${fg.white(wrapped[i])}`
-                    : `  ${fg.white(wrapped[i])}`;
+                const body =
+                    i === 0
+                        ? ` ${accent("❯")} ${fg.white(wrapped[i])}`
+                        : `   ${fg.white(wrapped[i])}`;
                 const visibleLen = stripAnsi(body).length;
                 const pad = Math.max(0, W - visibleLen);
                 out(paintInputBg(body + " ".repeat(pad)));
             }
+            out(fg.panelBorder("▀".repeat(W)));
         } else {
             out(fg.gray("─".repeat(W)));
             for (let i = 0; i < wrapped.length; i++) {

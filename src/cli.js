@@ -34,6 +34,8 @@ export function parseArgs(argv) {
         include: new Set([
             "user.message",
             "assistant.message",
+            "assistant.reasoning",
+            "assistant.reasoning_delta",
             "tool.execution_start",
             "tool.execution_complete",
             "session.mode_changed",
@@ -105,10 +107,9 @@ export function parseArgs(argv) {
     if (!Number.isFinite(args.min) || args.min < 0) {
         die("--min must be a non-negative number");
     }
-    // CLI mode always runs at real-time 1×. Any --speed the user
-    // passed would defeat the "this looks like a real session"
-    // illusion, so we just force it.
-    if (args.cliMode) args.speed = 1;
+    // Interactive CLI mode runs at real-time 1× for the live-session
+    // illusion. Piped output still honors --speed and autoplays.
+    if (args.cliMode && process.stdout.isTTY) args.speed = 1;
     return args;
 }
 
@@ -125,8 +126,8 @@ export function printHelp() {
             `      --cap MS           Max delay between events in ms (default 3000)\n` +
             `      --min MS           Min delay between events in ms (default 30)\n` +
             `      --no-thinking      Hide assistant reasoning blocks\n` +
-            `      --cli-mode         Hide replay controls; show @files ·\n` +
-            `                         #issues + model name like the real CLI\n` +
+            `      --cli-mode         Mirror current Copilot tabs, prompt frame,\n` +
+            `                         footer metadata, and compact timeline\n` +
             `      --theme MODE       Color theme: light, dark, or auto\n` +
             `                         (default: auto-detect via OSC 11 / COLORFGBG)\n` +
             `      --include TYPES    Comma-separated extra event types to show\n` +

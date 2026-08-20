@@ -54,44 +54,13 @@ export function renderSplashLines() {
     return out;
 }
 
-// Real-Copilot-CLI-style banner: rounded box with logo + header lines.
-// Used by --cli-mode so the session opening looks like a fresh CLI
-// launch rather than a replay. Returns an array of pre-colored lines
-// suitable for writeln().
-export function renderCliBannerLines() {
-    const BOX_WIDTH = 60;
-    const h = "─".repeat(BOX_WIDTH - 2);
-    const content = [
-        {
-            text: `${fg.bold(fg.white("GitHub Copilot"))} ${fg.gray(`v${getVersion()}`)}`,
-            plain: `GitHub Copilot v${getVersion()}`,
-        },
-        {
-            text: fg.gray("Describe a task to get started."),
-            plain: "Describe a task to get started.",
-        },
-        { text: "", plain: "" },
-        {
-            text: `${fg.gray("Tip:")} ${fg.cyan("/init")} ${fg.gray(
-                "Initialize Copilot instructions for this repository.",
-            )}`,
-            plain: "Tip: /init Initialize Copilot instructions for this repository.",
-        },
-        {
-            text: fg.gray("Copilot uses AI. Check for mistakes."),
-            plain: "Copilot uses AI. Check for mistakes.",
-        },
+// Current Copilot CLI mascot and safety notice.
+export function renderCliBannerLines(copilotVersion = "unknown") {
+    return [
+        `  ${fg.blue("╭─╮╭─╮")}`,
+        `  ${fg.blue("╰─╯╰─╯")}  ${fg.gray(`Copilot v${copilotVersion} uses AI.`)}`,
+        `  ${fg.white("█ ")}${fg.blue("▘▝")}${fg.white(" █")}  ${fg.gray("Check for mistakes.")}`,
+        `  ${fg.white(" ▔▔▔▔ ")}`,
+        "",
     ];
-
-    const lines = [];
-    lines.push(fg.magenta(`╭${h}╮`));
-    for (const row of content) {
-        const visible = row.plain.length;
-        const padRight = Math.max(0, BOX_WIDTH - 4 - visible);
-        lines.push(
-            `${fg.magenta("│")} ${row.text}${" ".repeat(padRight)} ${fg.magenta("│")}`,
-        );
-    }
-    lines.push(fg.magenta(`╰${h}╯`));
-    return lines;
 }
