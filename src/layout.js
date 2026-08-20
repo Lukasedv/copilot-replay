@@ -32,19 +32,15 @@ export const MAX_INPUT_ROWS = 10;
 // resets from `body` so the bg persists across embedded fg color codes
 // (each `fg.*` ends in a reset, which would otherwise cancel the outer
 // bg mid-line). The single trailing reset at the end restores defaults.
-function paintInputBg(body) {
-    const open = bgOpen("gray");
+function paintBg(body, name) {
+    const open = bgOpen(name);
     if (!open) return String(body);
     const stripped = String(body).replace(/\x1b\[0m/g, "");
     return `${open}${stripped}${ANSI_RESET}`;
 }
 
-function paintSelectedTab(body) {
-    const open = bgOpen("selected");
-    if (!open) return String(body);
-    const stripped = String(body).replace(/\x1b\[0m/g, "");
-    return `${open}${stripped}${ANSI_RESET}`;
-}
+const paintInputBg = (body) => paintBg(body, "gray");
+const paintSelectedTab = (body) => paintBg(body, "selected");
 
 function clipText(text, max) {
     const value = String(text ?? "");
