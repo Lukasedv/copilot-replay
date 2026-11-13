@@ -19,7 +19,15 @@ export function attachKeyHandlers(player) {
     process.stdin.resume();
     process.stdin.setEncoding("utf8");
 
-    const onData = (data) => {
+    // A single stdin chunk can hold several keys (fast typing, pastes,
+    // or terminals that batch input), so split it into escape sequences
+    // and single characters before dispatching.
+    const KEY_RE = /\x1b\[[0-9;]*[A-Za-z~]|\x1bO[A-Za-z]|\x1b|[\s\S]/g;
+    const onData = (chunk) => {
+        for (const key of String(chunk).match(KEY_RE) || []) handleKey(key);
+    };
+
+    const handleKey = (data) => {
         // Multi-byte CSI escape sequences (arrows, function keys).
         if (data.startsWith("\x1b[") || data.startsWith("\x1bO")) {
             if (data === "\x1b[C") {

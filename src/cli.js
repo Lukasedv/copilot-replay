@@ -29,6 +29,7 @@ export function parseArgs(argv) {
         list: false,
         help: false,
         showThinking: true,
+        thinking: null,
         theme: null,
         cliMode: false,
         include: new Set([
@@ -39,6 +40,8 @@ export function parseArgs(argv) {
             "session.mode_changed",
             "session.model_change",
             "session.info",
+            "session.warning",
+            "session.error",
             "session.start",
             "session.plan_changed",
         ]),
@@ -67,6 +70,12 @@ export function parseArgs(argv) {
                 break;
             case "--no-thinking":
                 args.showThinking = false;
+                break;
+            case "--collapse-thinking":
+                args.thinking = "collapsed";
+                break;
+            case "--expand-thinking":
+                args.thinking = "expanded";
                 break;
             case "--cli-mode":
             case "--realistic":
@@ -109,6 +118,10 @@ export function parseArgs(argv) {
     // passed would defeat the "this looks like a real session"
     // illusion, so we just force it.
     if (args.cliMode) args.speed = 1;
+    // Reasoning display: the real CLI collapses it to "❯ Thought for Ns"
+    // (cli mode default); replay mode expands it for the audience.
+    if (!args.showThinking) args.thinking = "hidden";
+    else if (!args.thinking) args.thinking = args.cliMode ? "collapsed" : "expanded";
     return args;
 }
 
@@ -124,9 +137,13 @@ export function printHelp() {
             `  -s, --speed N          Playback speed multiplier (default 4)\n` +
             `      --cap MS           Max delay between events in ms (default 3000)\n` +
             `      --min MS           Min delay between events in ms (default 30)\n` +
-            `      --no-thinking      Hide assistant reasoning blocks\n` +
-            `      --cli-mode         Hide replay controls; show @files ·\n` +
-            `                         #issues + model name like the real CLI\n` +
+            `      --no-thinking      Hide assistant reasoning entirely\n` +
+            `      --collapse-thinking  Show reasoning as a "Thought for Ns" row\n` +
+            `                         (default in --cli-mode)\n` +
+            `      --expand-thinking  Also show the reasoning text (default\n` +
+            `                         outside --cli-mode)\n` +
+            `      --cli-mode         Look like a live Copilot CLI: app header,\n` +
+            `                         home tabs, mode · permission · model footer\n` +
             `      --theme MODE       Color theme: light, dark, or auto\n` +
             `                         (default: auto-detect via OSC 11 / COLORFGBG)\n` +
             `      --include TYPES    Comma-separated extra event types to show\n` +

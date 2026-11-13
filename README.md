@@ -123,31 +123,48 @@ replies, tool output) is scaled by the playback speed.
 | `-s, --speed N` | `4` | Playback speed multiplier. |
 | `--cap MS` | `3000` | Max delay between events (after scaling). Prevents dead air. |
 | `--min MS` | `30` | Min delay between events. |
-| `--no-thinking` | off | Hide assistant reasoning blocks. |
+| `--no-thinking` | off | Hide assistant reasoning entirely. |
+| `--collapse-thinking` | on in `--cli-mode` | Show reasoning as a single `❯ Thought for Ns` row, like the real CLI. |
+| `--expand-thinking` | on otherwise | Also show the reasoning text under a `⌄ Thought for Ns` row. |
 | `--theme MODE` | `auto` | Color palette: `light`, `dark`, or `auto`. Auto-detect uses `COLORFGBG` then OSC 11 query, falls back to `dark`. Override with `COPILOT_REPLAY_THEME=light\|dark`. |
-| `--cli-mode` / `--realistic` | off | Present the replay as a live Copilot CLI session: real-CLI banner, no replay chrome, `@ files · # issues` plus model name in the footer. Press `→` to play one user-prompt segment; `space` still pauses. Speed is locked at 1×. |
+| `--cli-mode` / `--realistic` | off | Present the replay as a live Copilot CLI session: home tabs, mascot header, the CLI's `Mode · Permission · / commands … Model` status line, `Session: N AIC used`, and the exit summary at the end. No replay chrome. Press `→` to play one user-prompt segment; `space` still pauses. Speed is locked at 1×. |
 | `--include TYPES` | — | Comma-separated extra event types to show. |
 | `--exclude TYPES` | — | Comma-separated event types to hide. |
 | `-h, --help` | — | Show usage. |
 
+Colors follow the CLI's default GitHub theme. They're emitted as 24-bit
+color when the terminal supports it (Windows Terminal, VS Code, iTerm2,
+WezTerm, Ghostty, kitty, or `COLORTERM=truecolor`) and as the nearest
+xterm-256 color otherwise. Force either with
+`COPILOT_REPLAY_COLOR=truecolor|256`.
+
 By default the player shows: user messages, assistant thinking + replies,
-tool calls + results, model/mode changes, and session info. Hooks, turn
-markers, streaming deltas, etc. are hidden so the replay reads like a
-conversation instead of a log dump.
+tool calls + results, model/mode changes, and session info, warnings and
+errors. Hooks, turn markers, streaming deltas, subagent-internal turns,
+skill/system-injected messages, etc. are hidden so the replay reads like
+the CLI timeline instead of a log dump.
 
 ## Layout
 
-While a replay is running, the terminal is carved into two regions:
+While a replay is running, the terminal is carved into regions that
+mirror today's Copilot CLI:
 
-- A **scroll region** on top, where session events are re-rendered as they
-  "happen".
-- A **sticky footer** at the bottom that mirrors the real CLI's chrome:
-  cwd line, the input box where user prompts get typed, and a status bar
-  with the current speed and the live key bindings.
+- A **timeline** that grows from the top, where session events are
+  re-rendered as they "happen".
+- A **sticky footer**: the cwd and git branch line, the half-block
+  **prompt frame** where user prompts get typed (its left bar takes the
+  mode color — blue for plan, purple for autopilot), and a status line
+  (replay controls by default, the CLI's own status line in
+  `--cli-mode`).
 
-User prompts are typed into the footer input box one character at a time,
-then committed up into the scroll history exactly like the real CLI does
-when you press Enter.
+User prompts are typed into the prompt frame one character at a time,
+then committed into the timeline as a shaded `❯` panel, exactly like
+the real CLI does when you press Enter.
+
+`ask_user` questions and plan approvals replay as the CLI's
+bottom-anchored dialogs: the question and choices appear in place of the
+prompt frame, the cursor moves to the option the user picked (free-text
+answers are typed out), and the dialog collapses into its timeline row.
 
 ## How it works
 
@@ -159,22 +176,40 @@ Every Copilot CLI session writes its full timeline to
 
 Each line is a JSON event — `user.message`, `assistant.message` (with its
 `reasoningText`), `tool.execution_start`, `tool.execution_complete`,
-`session.mode_changed`, and so on. `copilot-replay` reads those events,
-filters to the interesting ones, and re-renders each one with a delay
-derived from the real time gap between events, scaled by `1 / speed` and
-clamped to `[min, cap]` milliseconds.
+`human_response.recorded`, `session.mode_changed`, and so on.
+`copilot-replay` reads those events, filters to the interesting ones,
+and re-renders each one with a delay derived from the real time gap
+between events, scaled by `1 / speed` and clamped to `[min, cap]`
+milliseconds. Recordings from older CLI versions (0.0.x onward) still
+replay; newer fields are used when present.
 
-Assistant reasoning gets a pulsating `Thinking…` spinner before it
-appears; both reasoning and final replies stream out line-by-line with
-light markdown rendering (bold, inline code, bullets, headings, code
-fences). Tool calls render with the same bullet-and-branch style the real
-CLI uses.
+Tool calls render in the CLI's compact timeline format — one row per
+call, with the CLI's icons and file-type badges:
+
+```
+ ● Read notes.txt 3 lines read
+ $ Shell List files in the current folder 6 lines…
+   Get-ChildItem -File
+ ● Asked user Which item should I add to notes.txt?            40s
+   └ Shopping item: bread
+ JS Edit app.js +6 -1
+ ● Todo added 2 items
+   │ Adding multiply function
+   └ Exporting multiply function
+ ❯ Thought for 2s
+```
+
+Assistant replies stream out line-by-line with light markdown rendering
+(bold, inline-code chips, lists, headings, code fences).
 
 ### Fidelity
 
 Close to the real CLI, not pixel-perfect. The real CLI renders through an
 internal React/Ink UI that's not reachable from outside the process, so
 this replayer re-implements the look by reading the raw event log.
+Collapsed rows can't be expanded (there's no `ctrl+o`), diffs and tool
+output stay collapsed as in the CLI's default view, and timings are
+derived from event timestamps.
 
 ## Project layout
 
@@ -206,7 +241,7 @@ an issue first so we can align on scope.
 Local checks:
 
 ```bash
-npm run check          # node --check every source file
+npm run check          # node --check every source file (works on Windows too)
 node bin/copilot-replay.mjs --help
 ```
 

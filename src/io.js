@@ -23,15 +23,14 @@ export function rawWrite(s) {
 
 export function write(s) {
     if (layoutRef && layoutRef.active) {
-        STREAM.write(`\x1b[${layoutRef.scrollBottomRow};1H`);
+        STREAM.write(`\x1b[${layoutRef.nextRow};1H`);
     }
     STREAM.write(s);
 }
 
 export function writeln(s = "") {
     if (layoutRef && layoutRef.active) {
-        STREAM.write(`\x1b[${layoutRef.scrollBottomRow};1H`);
-        STREAM.write(s + "\n");
+        layoutRef.scrollWriteln(s);
     } else {
         STREAM.write(s + "\n");
     }
