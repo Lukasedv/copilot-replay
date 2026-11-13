@@ -7,20 +7,69 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — match today's Copilot CLI (1.0.10x)
+- Colors now follow the CLI's default GitHub theme (dark + light),
+  emitted as 24-bit color where supported with an xterm-256 fallback
+  (`COPILOT_REPLAY_COLOR=truecolor|256` to force). Mode accents are the
+  CLI's: plan → blue, autopilot → purple, shell → yellow.
+- New mascot app header (`Copilot vX uses AI. Check for mistakes.`)
+  using the recorded CLI version, replacing the old boxed banner.
+- Footer rebuilt as the CLI's prompt frame: cwd + `[⎇ branch]` line,
+  half-block frame with a mode-colored left bar, and (in `--cli-mode`)
+  the `Interactive · Manual Approval · / commands … Model` status line,
+  `◎ Working · ctrl+c interrupt` while busy, `Session: N AIC used`, and
+  the home tabs row on top.
+- Submitted prompts render as the CLI's shaded `❯` panel.
+- Timeline now grows from the top like the CLI's fullscreen view, and
+  the scroll region is repainted from history when the footer changes
+  size (no more blank gaps after dialogs or long prompts).
+- Tool calls use the compact one-row format: `● Read x N lines read`,
+  `$ Shell <description> N lines…` with the command underneath,
+  `/ Search`, `Edit`/`Create` with `+N -M`, two-letter file-type badges
+  (`JS`, `TS`, `MD`, `{}` …), right-aligned durations, `│`/`└` child
+  rows, `✗` failures with the error text and exit code.
+- `ask_user` and `exit_plan_mode` replay as the CLI's bottom dialogs
+  (`Copilot needs information.` / `Plan Ready for Review`) with the
+  selection animated at human pace, then collapse to `● Asked user …`
+  / `● Plan ready for review …` rows plus the execution-mode notice.
+- Reasoning shows as `❯ Thought for Ns` (collapsed, default in
+  `--cli-mode`) or `⌄ Thought for Ns` with the text under a `│` rule
+  (default otherwise). New `--collapse-thinking` / `--expand-thinking`.
+- Markdown: inline code renders as chips, links as link-colored text,
+  list bullets as `-`.
+- `--cli-mode` ends with the CLI's exit summary (Changes, AI Credits,
+  Tokens, Resume) from the recorded `session.shutdown`.
+
 ### Added
+- Parsing for newer `events.jsonl` content: `apply_patch` (per-file
+  rows), SQL todo inserts/updates (`Todo added` / `✔ Todo completed`),
+  `skill`, subagent `task` rows (agent name, tool-call count,
+  duration), MCP tools via `mcpServerName`/`mcpToolName`,
+  `human_response.recorded`, `session.permissions_changed`,
+  `session.usage_checkpoint`, `session.warning`, `session.error`, and
+  `workspace.yaml` `name:` titles in the picker.
+
+### Fixed
+- Prompts sent through slash commands or forwarded by another agent are
+  shown; autopilot continuations, memory/skill injections and
+  `<system_notification>` payloads stay hidden.
+- Subagent-internal tool calls and messages (`parentToolCallId`) no
+  longer flood the main timeline.
+- Model announcements aren't duplicated when the CLI already logged a
+  `Model changed from …` info line; the initial model resolution is
+  silent.
+- Arrow keys work when the terminal delivers several keys in one chunk.
+- `npm run check` works on Windows.
+
+### Earlier unreleased changes
 - `--cli-mode` (alias `--realistic`) flag: replays a session as a
   convincing live Copilot CLI session. Hides all replay chrome;
   advance with `→`, pause/resume with `space`, speed locked at 1×.
 - Light/dark theme support (`--theme light|dark|auto`, env
   `COPILOT_REPLAY_THEME`, OSC 11 auto-detection).
-- Input prompt rendered in a gray bg panel matching the real CLI.
 - MCP / plugin tool results suppressed (compact one-liner instead).
-- Mode-accent coloring: `plan` → cyan, `autopilot` → green chevron,
-  cursor, and status bar. Status bar shows `/ commands · ? help`.
-
-### Fixed
-- Skill-injected `user.message` events (with a `source` field) are
-  no longer rendered in the prompt.
+- Skill-injected `user.message` events are no longer rendered in the
+  prompt.
 - Eliminated per-keystroke flash in the input box on Windows Terminal.
 - `fg.dim` uses explicit mid-grey instead of SGR 2 faint attribute,
   which was invisible on light backgrounds.

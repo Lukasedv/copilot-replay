@@ -42,6 +42,6 @@
   },
   "scripts": {
     "start": "node bin/copilot-replay.mjs",
-    "check": "node --check bin/copilot-replay.mjs && for f in src/*.js; do node --check \"$f\" || exit 1; done"
+    "check": "node -e \"const fs=require('fs'),cp=require('child_process');for(const f of ['bin/copilot-replay.mjs',...fs.readdirSync('src').filter(n=>n.endsWith('.js')).map(n=>'src/'+n)])cp.execFileSync(process.execPath,['--check',f],{stdio:'inherit'})\""
   }
 }

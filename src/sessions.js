@@ -47,6 +47,9 @@ export function listSessions() {
                 if (m1) cwd = sanitizeString(m1[1].trim());
                 const m2 = /^summary:\s*(.*)$/m.exec(text);
                 if (m2) summary = sanitizeString(m2[1].trim());
+                // Newer CLIs store the session title as `name:`.
+                const m3 = /^name:\s*(.*)$/m.exec(text);
+                if (!summary && m3) summary = sanitizeString(m3[1].trim());
             } catch {
                 /* ignore — metadata is best-effort */
             }
