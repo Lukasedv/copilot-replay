@@ -528,27 +528,61 @@ function renderShellIO(name, args, data) {
     ];
 }
 
+// Search row summary, as the CLI (1.0.111) computes it: trailing notes and
+// unreadable-path warnings don't count as results, the tool's own
+// `[grep …: N …]` header gives the count when present, and a result
+// spilled to a temp file reads "results too large to list".
+const SEARCH_NOTES = /(?:\n\n\((?:Note|Warning): [^\n]*\))+$/;
+const SEARCH_UNREADABLE =
+    /\n\n\(Warning: Some files or directories could not be searched, so these results may be incomplete:\n[\s\S]*\)(?:\n<[^\n]*>)?$/;
+const SEARCH_REPAIRED = /(?:^|\n\n)Note: this tool call was repaired before it ran\.[^\n]*$/;
+const SEARCH_FALLBACK = /(?:^|\n\n)Note: tool '(?:rg|grep)' is not available, so this call ran as '(?:rg|grep)'\.[^\n]*$/;
+const SEARCH_TOO_LARGE = /^Output too large to read at once \((\d+ bytes|\d+\.\d (?:KB|MB))\)\. Saved to: /;
+const SEARCH_HEADERS = {
+    glob: /^\[glob: (\d+) path\(s\).*\]$/,
+    files_with_matches: /^\[grep-paths: (\d+) path\(s\).*\]$/,
+    content: /^\[grep content: (\d+) matches across .*\]$/,
+    count: /^\[grep count: \d+ match\(es\) across (\d+) file\(s\).*\]$/,
+};
+
+function cleanSearchText(s) {
+    return String(s ?? "").trim().replace(SEARCH_REPAIRED, "").replace(SEARCH_FALLBACK, "");
+}
+
+function searchSummary(name, args, data) {
+    const res = data?.result;
+    const content = cleanSearchText(typeof res === "string" ? res : res?.content);
+    const detailed = typeof res === "object" && res?.detailedContent ? cleanSearchText(res.detailedContent) : content;
+    const text = detailed.replace(SEARCH_UNREADABLE, "").replace(SEARCH_NOTES, "");
+    if (!text || text === "No matches found." || text === "No files matched the pattern.") return "No matches found";
+    const big = SEARCH_TOO_LARGE.exec(text)?.[1] ?? SEARCH_TOO_LARGE.exec(content)?.[1];
+    if (big) return `results too large to list (${big})`;
+    const mode = name === "glob" ? "glob" : args?.output_mode ?? "files_with_matches";
+    const header = SEARCH_HEADERS[mode];
+    const lines = text.split("\n");
+    const fromHeader = header ? (header.exec(lines[0])?.[1] ?? header.exec(content.split("\n")[0])?.[1]) : undefined;
+    const n = fromHeader != null ? Number(fromHeader) : lines.length;
+    return mode === "content" ? `${plural(n, "line")} found` : `${plural(n, "file")} found`;
+}
+
 function renderSearch(name, args, data, ctx) {
     const pattern = String(args?.pattern ?? args?.query ?? "");
-    const where = args?.path || args?.paths;
-    let desc = name === "glob" ? pattern : pattern ? `"${pattern}"` : "";
-    if (where) {
-        const w = Array.isArray(where) ? where.join(", ") : String(where);
-        desc += ` in ${displayPath(w, ctx?.cwd)}`;
+    const where = args?.path ?? args?.paths;
+    const paths = (Array.isArray(where) ? where : where ? [where] : [])
+        .map((p) => displayPath(String(p), ctx?.cwd))
+        .filter((p) => p && p !== ".")
+        .join(", ");
+    const parts = [`"${pattern}"`];
+    if (name === "glob") {
+        if (paths) parts.push(`in ${paths}`);
+    } else {
+        if (args?.glob) parts.push(`in ${args.glob}`);
+        else if (args?.type) parts.push(`in ${args.type} files`);
+        if (paths) parts.push(`(${paths})`);
     }
+    const desc = parts.join(" ");
     if (data?.success === false) return failedRow("Search", desc, data, { variant: "error" });
-    const text = resultText(data).trim();
-    let meta = "";
-    if (text && !/^No (matches|files) found/i.test(text)) {
-        const n = text.split("\n").filter((l) => l.trim() && !/^\[glob:/.test(l)).length;
-        const mode = args?.output_mode;
-        meta =
-            name === "glob" || mode === "files_with_matches" || mode === "count" || !mode
-                ? plural(n, "file")
-                : plural(n, "line");
-    } else if (data) {
-        meta = "no matches";
-    }
+    const meta = data ? searchSummary(name, args, data) : "";
     return [row({ variant: "search", title: "Search", desc, meta: fg.gray(meta) })];
 }
 
@@ -715,14 +749,20 @@ function resolveAskUserAnswer(fields, resultData, human) {
     const res = resultData?.result;
     const content = String(res?.content ?? "").trim();
     const detailed = String(res?.detailedContent ?? "").trim();
+    const hr = human?.response;
+    // CLI 1.0.111+ records refusals structurally (`action`, `dismissed`).
+    if (hr?.action === "decline" || hr?.dismissed === true) return { kind: "declined" };
+    if (hr?.action === "cancel") return { kind: "cancelled" };
     if (/^User (declined|did not)/i.test(content)) return { kind: "declined" };
     if (/^User can(celled|celed)\b/i.test(content)) return { kind: "cancelled" };
     const values = new Map();
-    const hc = human?.response?.content;
+    const hc = hr?.content;
     if (hc && typeof hc === "object") {
         for (const [k, v] of Object.entries(hc)) values.set(k, String(v));
     } else if (typeof hc === "string" && fields.length === 1) {
         values.set(fields[0].key, hc);
+    } else if (hr?.responseKind === "user_input" && String(hr.answer ?? "").trim() && fields.length === 1) {
+        values.set(fields[0].key, String(hr.answer));
     }
     if (!values.size) {
         const sel = content.match(/^User selected:\s*([\s\S]+)$/);

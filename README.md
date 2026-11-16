@@ -190,6 +190,7 @@ call, with the CLI's icons and file-type badges:
  ● Read notes.txt 3 lines read
  $ Shell List files in the current folder 6 lines…
    Get-ChildItem -File
+ / Search "multiply" in *.js (src) 3 lines found
  ● Asked user Which item should I add to notes.txt?            40s
    └ Shopping item: bread
  JS Edit app.js +6 -1
