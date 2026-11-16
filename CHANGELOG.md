@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — sync with Copilot CLI 1.0.107–1.0.112
+- `Search` rows match the CLI's: `"pattern" in <glob|type files>
+  (path)` for grep, `"pattern" in path` for glob, and `N files found` /
+  `N lines found` / `No matches found` / `results too large to list
+  (25.5 KB)`. Counts come from the tool's `[grep …: N …]` header when
+  present and ignore context separators, trailing notes, and warnings
+  about unreadable folders (CLI 1.0.109–1.0.111). Before this change,
+  empty globs (`No files matched the pattern.`) read as `1 file`.
+- `Asked user` rows use the structured answer in
+  `human_response.recorded`: the `user_input` answer, and the
+  `action: "decline" | "cancel"` / `dismissed` refusal fields added in
+  CLI 1.0.111. Older recordings still fall back to the tool result text.
+
 ### Changed — match today's Copilot CLI (1.0.10x)
 - Colors now follow the CLI's default GitHub theme (dark + light),
   emitted as 24-bit color where supported with an xterm-256 fallback
