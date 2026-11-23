@@ -857,12 +857,13 @@ function clearPending() {
 async function animateAskUser(player, question, fields, answer) {
     if (!layout.active || player.fastForwarding) return;
     const values = answer?.kind === "values" ? answer.values : new Map();
+    const pendingQuestion = question.split("\n")[0] || "Waiting for response";
     for (const f of fields) {
         if (player.quitRequested) break;
         const val = values.get(f.key) ?? (fields.length === 1 && answer?.kind === "text" ? answer.text : undefined);
         if (f.isFreeText) {
             layout.setDialog(askDialog(question, f, 0, "", null));
-            drawPending(waitingRow("Asking user", "Waiting for response"));
+            drawPending(waitingRow("Asking user", pendingQuestion));
             await player.sleep(HUMAN_READ_MS);
             let typed = "";
             for (const ch of String(val ?? "").slice(0, 200)) {
@@ -878,7 +879,7 @@ async function animateAskUser(player, question, fields, answer) {
             if (isOther) target = f.options.length;
             if (target < 0) target = 0;
             layout.setDialog(askDialog(question, f, 0, "", null));
-            drawPending(waitingRow("Asking user", "Waiting for response"));
+            drawPending(waitingRow("Asking user", pendingQuestion));
             await player.sleep(HUMAN_READ_MS);
             for (let c = 1; c <= target; c++) {
                 if (player.quitRequested || player.fastForwarding) break;

@@ -165,6 +165,8 @@ the real CLI does when you press Enter.
 bottom-anchored dialogs: the question and choices appear in place of the
 prompt frame, the cursor moves to the option the user picked (free-text
 answers are typed out), and the dialog collapses into its timeline row.
+While an `ask_user` dialog is open, its pending timeline row shows the
+recorded question, or `Waiting for response` if the recording has none.
 
 ## How it works
 

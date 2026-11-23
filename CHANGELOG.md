@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Pending `ask_user` timeline rows show the recorded question while the
+  dialog is open, matching Copilot CLI 1.0.112.
+
 ### Changed — sync with Copilot CLI 1.0.107–1.0.112
 - `Search` rows match the CLI's: `"pattern" in <glob|type files>
   (path)` for grep, `"pattern" in path` for glob, and `N files found` /
