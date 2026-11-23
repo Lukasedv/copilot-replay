@@ -140,9 +140,9 @@ xterm-256 color otherwise. Force either with
 
 By default the player shows: user messages, assistant thinking + replies,
 tool calls + results, model/mode changes, and session info, warnings and
-errors. Hooks, turn markers, streaming deltas, subagent-internal turns,
-skill/system-injected messages, etc. are hidden so the replay reads like
-the CLI timeline instead of a log dump.
+errors. Hooks, turn markers, streaming deltas, subagent-internal turns
+(events carrying an `agentId`), skill/system-injected messages, etc. are
+hidden so the replay reads like the CLI timeline instead of a log dump.
 
 ## Layout
 
