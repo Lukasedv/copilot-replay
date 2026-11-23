@@ -1048,6 +1048,14 @@ async function emitThinking(player, reasoning, ms, mode) {
 
 // ── Dispatcher ───────────────────────────────────────────────────────────
 
+// Events emitted inside a sub-agent. The CLI nests them under their task
+// row instead of the main timeline. The envelope `agentId` marks them in
+// every recording since ~1.0.33; CLI 1.0.114 dropped the older
+// `data.parentToolCallId`, so check both.
+export function isSubagentEvent(ev) {
+    return !!(ev?.agentId || ev?.data?.parentToolCallId);
+}
+
 function isHiddenUserMessage(d) {
     const content = String(d.content ?? "").trim();
     if (!content) return true;
@@ -1063,6 +1071,7 @@ function isHiddenUserMessage(d) {
 
 export function describeEvent(ev, opts, ctx) {
     const d = ev.data || {};
+    if (isSubagentEvent(ev)) return null;
     switch (ev.type) {
         case "session.start":
             return async (player) => {
@@ -1076,9 +1085,6 @@ export function describeEvent(ev, opts, ctx) {
             };
         }
         case "assistant.message": {
-            // Subagent turns are nested under their task in the CLI, not
-            // shown inline in the main timeline.
-            if (d.parentToolCallId) return null;
             const mode = opts.thinking ?? (opts.showThinking === false ? "hidden" : "expanded");
             const reasoning = mode === "hidden" ? "" : cleanReasoning(d.reasoningText);
             const content = String(d.content ?? "").trim();
@@ -1103,7 +1109,6 @@ export function describeEvent(ev, opts, ctx) {
             };
         }
         case "tool.execution_start": {
-            if (d.parentToolCallId) return null;
             const resultEv = ctx?.toolResults?.get(d.toolCallId);
             const data = resultEv?.data;
             const toolName = d.toolName ?? "tool";

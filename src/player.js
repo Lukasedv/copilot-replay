@@ -12,7 +12,7 @@ import { writeln } from "./io.js";
 import { layout } from "./layout.js";
 import { waitForStart } from "./anim.js";
 import { renderCliBannerLines, renderExitSummaryLines } from "./banner.js";
-import { describeEvent } from "./render.js";
+import { describeEvent, isSubagentEvent } from "./render.js";
 
 export class Player {
     constructor(events, opts) {
@@ -509,17 +509,17 @@ export function buildContext(events, opts = {}) {
                 if (d.toolCallId) subagents.set(d.toolCallId, { ...(subagents.get(d.toolCallId) || {}), completed: d });
                 break;
             case "assistant.turn_end": {
-                if (d.parentToolCallId) break;
+                if (isSubagentEvent(ev)) break;
                 // Idle once the turn ends and no further assistant turn
                 // starts before the next prompt (or the end of the log).
                 let idle = true;
                 for (let j = i + 1; j < events.length; j++) {
                     const n = events[j];
-                    if (n.type === "assistant.turn_start" && !n.data?.parentToolCallId) {
+                    if (n.type === "assistant.turn_start" && !isSubagentEvent(n)) {
                         idle = false;
                         break;
                     }
-                    if (n.type === "user.message" && String(n.data?.content ?? "").trim() && !n.data?.isAutopilotContinuation) break;
+                    if (n.type === "user.message" && !isSubagentEvent(n) && String(n.data?.content ?? "").trim() && !n.data?.isAutopilotContinuation) break;
                 }
                 if (idle) idleAfter.add(i);
                 break;
@@ -527,10 +527,10 @@ export function buildContext(events, opts = {}) {
             default:
                 break;
         }
-        if (ev.type === "assistant.message" && !d.parentToolCallId && d.reasoningText) {
+        if (ev.type === "assistant.message" && !isSubagentEvent(ev) && d.reasoningText) {
             if (lastAnchorTs != null && Number.isFinite(ts)) thinkMs.set(ev, ts - lastAnchorTs);
         }
-        if (ANCHOR_TYPES.has(ev.type) && !d.parentToolCallId && Number.isFinite(ts)) {
+        if (ANCHOR_TYPES.has(ev.type) && !isSubagentEvent(ev) && Number.isFinite(ts)) {
             lastAnchorTs = ts;
         }
     }

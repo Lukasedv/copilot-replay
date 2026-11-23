@@ -20,6 +20,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `action: "decline" | "cancel"` / `dismissed` refusal fields added in
   CLI 1.0.111. Older recordings still fall back to the tool result text.
 
+### Fixed — Copilot CLI 1.0.114 sub-agent events
+- Sub-agent events are recognized by the event envelope's `agentId`.
+  CLI 1.0.114 dropped `data.parentToolCallId` from `assistant.message`
+  and `tool.execution_*`. Without this fix, a sub-agent's replies and
+  tool calls replayed inline in the main timeline. The sub-agent's own
+  task prompt, which never carried `parentToolCallId`, no longer shows as
+  a typed user prompt. Older recordings that only carry
+  `parentToolCallId` still work.
+
 ### Changed — match today's Copilot CLI (1.0.10x)
 - Colors now follow the CLI's default GitHub theme (dark + light),
   emitted as 24-bit color where supported with an xterm-256 fallback
